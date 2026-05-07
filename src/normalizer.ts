@@ -6,10 +6,13 @@
  * settings via getKeys().
  *
  * Behaviors (gated by toggles):
+ *   - normalizeInferType (does double duty):
+ *       (a) fill in jd-id from filename when missing — required for any
+ *           later inference to fire, since steps 1-2 below need the value
+ *       (b) add inferred type when missing (writes a tag when typeAsTag
+ *           is on; skipped when value is `id` and writeTypeForGenericIds
+ *           is off)
  *   - normalizeQuoteId: wrap unquoted IDs in single quotes
- *   - normalizeInferType: add inferred type when missing (writes a tag
- *       instead when typeAsTag is on; skipped when value is `id` and
- *       writeTypeForGenericIds is off)
  *   - normalizeSortKeys: reorder frontmatter keys into canonical order
  *   - normalizeStripHeadingId: rewrite `# XX.YY Title` as `# Title`
  *
@@ -43,6 +46,7 @@ const ZERO_TYPES: Record<string, string> = {
 	"02": "tasks",
 	"03": "templates",
 	"04": "links",
+	"05": "policies",
 	"06": "knowledge-base",
 	"08": "someday",
 	"09": "archive",
@@ -221,8 +225,18 @@ export class FrontmatterNormalizer {
 		let entries = parseFrontmatter(fmText);
 		let changed = false;
 
+		// 0. Fill in jd-id from filename if missing. Without this, downstream
+		//    type inference can't run on freshly-created notes — and the
+		//    matching tag (e.g. jd/inbox for XX.01) never gets added.
+		const fnId = match[1];
+		let idEntry = entries.find((e) => e.key === keys.id);
+		if (this.settings.normalizeInferType && !idEntry) {
+			idEntry = { key: keys.id, text: `${keys.id}: '${fnId}'` };
+			entries.push(idEntry);
+			changed = true;
+		}
+
 		// 1. Quote ID if unquoted
-		const idEntry = entries.find((e) => e.key === keys.id);
 		if (this.settings.normalizeQuoteId && idEntry) {
 			const m = idEntry.text.match(/^[a-zA-Z][\w-]*:\s*(\S+)$/);
 			if (m && !m[1].startsWith("'") && !m[1].startsWith('"')) {

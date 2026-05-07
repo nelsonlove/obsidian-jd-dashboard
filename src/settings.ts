@@ -2,8 +2,22 @@
  * Plugin settings — configures paths, frontmatter keys, and normalizer behavior.
  */
 
-import { type App, PluginSettingTab, Setting } from "obsidian";
+import { type App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type JDDashboardPlugin from "./main";
+import { getProvider, listProviders, type ProviderId } from "./llm/provider";
+import { getApiKey, hasApiKey, setApiKey } from "./llm/secrets";
+
+/** Registry of LLM-driven tasks. Add a row here to expose a new per-task model picker. */
+export const LLM_TASKS = [
+	{
+		id: "renderFiles",
+		label: "Render filesystem contents",
+		description: "Used by the JD: Render filesystem contents command.",
+	},
+] as const satisfies readonly { id: string; label: string; description: string }[];
+
+/** Union of valid task IDs, derived from LLM_TASKS so typos are caught at compile time. */
+export type LlmTaskId = (typeof LLM_TASKS)[number]["id"];
 
 export interface JDSettings {
 	// ── Paths ────────────────────────────────────────────────────
@@ -13,6 +27,8 @@ export interface JDSettings {
 	jdexPath: string;
 	/** Absolute path to jd.yaml (config — expanded areas, etc.) */
 	jdConfigPath: string;
+	/** Vault-relative path to the JD templates folder (read by new-from-template commands) */
+	templatesFolder: string;
 
 	// ── Dashboard ────────────────────────────────────────────────
 	/** Show inbox items with count 0 */
@@ -62,12 +78,46 @@ export interface JDSettings {
 	 * people in 27, etc.) — the user manages tags directly.
 	 */
 	inferTypeForExpandedIds: boolean;
+
+	// ── LLM providers ────────────────────────────────────────────
+	/**
+	 * Per-provider model cache. Populated by listing the provider's
+	 * /v1/models endpoint after an API key is entered. Cached to avoid
+	 * a network call every time the settings UI opens.
+	 */
+	llmProviders: Record<ProviderId, ProviderState>;
+
+	/**
+	 * Per-task model assignment. Each LLM-driven command picks its model
+	 * from this map; a missing entry means the command is unconfigured.
+	 * Keys are constrained to `LlmTaskId` so a typo (`renderFile` vs
+	 * `renderFiles`) fails to compile rather than silently doing nothing.
+	 */
+	llmTaskModels: Partial<Record<LlmTaskId, TaskModel>>;
+
+	/**
+	 * Override prompt for the render-files command. Empty string falls
+	 * back to the built-in default (see commands/render-files.ts).
+	 */
+	renderFilesPrompt: string;
+}
+
+export interface ProviderState {
+	models: string[];
+	fetchedAt: number;
+	lastError?: string;
+}
+
+export interface TaskModel {
+	provider: ProviderId;
+	model: string;
 }
 
 export const DEFAULT_SETTINGS: JDSettings = {
 	jdRoot: "~/Documents",
 	jdexPath: "~/.local/share/jd/jd-index.yaml",
 	jdConfigPath: "~/.config/jd/jd.yaml",
+	templatesFolder: "00-09 System/00 System management/00.03 Templates for the system",
 	showEmptyInboxes: false,
 	staleDays: 90,
 	auditOnStartup: false,
@@ -90,6 +140,13 @@ export const DEFAULT_SETTINGS: JDSettings = {
 	writeTypeForGenericIds: true,
 
 	inferTypeForExpandedIds: false,
+
+	llmProviders: {
+		anthropic: { models: [], fetchedAt: 0 },
+		openai: { models: [], fetchedAt: 0 },
+	},
+	llmTaskModels: {},
+	renderFilesPrompt: "",
 };
 
 // ── Tag-map serialization ────────────────────────────────────────
@@ -164,6 +221,21 @@ export class JDSettingsTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.jdConfigPath)
 					.onChange(async (value) => {
 						this.plugin.settings.jdConfigPath = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Templates folder")
+			.setDesc(
+				"Vault-relative path to the JD templates folder. Read by 'New standard zero', 'New ID', and 'New stem' commands."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("00-09 System/00 System management/00.03 Templates for the system")
+					.setValue(this.plugin.settings.templatesFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.templatesFolder = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -412,5 +484,167 @@ export class JDSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		// ── AI provider keys ─────────────────────────────────────
+		new Setting(containerEl).setName("AI provider keys").setHeading();
+		containerEl.createEl("p", {
+			cls: "setting-item-description",
+			text: "API keys are stored in your OS keychain via Obsidian's SecretStorage — never in data.json, never synced. Entering or changing a key fetches the model list for that provider.",
+		});
+
+		for (const { id, label } of listProviders()) {
+			this.renderProviderKeyRow(containerEl, id, label);
+		}
+
+		// ── Per-task models ──────────────────────────────────────
+		new Setting(containerEl).setName("Per-task models").setHeading();
+		containerEl.createEl("p", {
+			cls: "setting-item-description",
+			text: "Each LLM-driven command picks its model here. Options come from the cached model lists above.",
+		});
+
+		for (const task of LLM_TASKS) {
+			this.renderTaskModelRow(containerEl, task);
+		}
+
+		// ── Render-files prompt ──────────────────────────────────
+		new Setting(containerEl).setName("Render filesystem contents").setHeading();
+
+		new Setting(containerEl)
+			.setName("Custom prompt")
+			.setDesc(
+				"Override the default prompt used by 'JD: Render filesystem contents'. Leave blank to use the built-in default. Available placeholders: {path}, {count}, {listing}."
+			)
+			.addTextArea((text) => {
+				text.inputEl.rows = 8;
+				text.inputEl.style.fontFamily = "var(--font-monospace)";
+				text.inputEl.style.width = "100%";
+				text
+					.setPlaceholder("(uses built-in default)")
+					.setValue(this.plugin.settings.renderFilesPrompt)
+					.onChange(async (value) => {
+						this.plugin.settings.renderFilesPrompt = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
+
+	private renderProviderKeyRow(
+		containerEl: HTMLElement,
+		providerId: ProviderId,
+		label: string
+	): void {
+		const state = this.plugin.settings.llmProviders[providerId];
+		const setting = new Setting(containerEl)
+			.setName(`${label} API key`)
+			.setDesc(this.providerStatusText(providerId, state));
+
+		setting.addButton((btn) =>
+			btn
+				.setButtonText("Refresh models")
+				.setTooltip("Re-fetch the model list using the current key")
+				.onClick(async () => {
+					await this.refreshModels(providerId);
+					this.display();
+				})
+		);
+
+		// SecretComponent shows a masked input with reveal toggle. We hand
+		// it the current value (if any) and persist on change.
+		setting.controlEl.createDiv({}, async (wrapper) => {
+			const secret = new SecretComponent(this.app, wrapper);
+			const current = getApiKey(this.app, providerId) ?? "";
+			secret.setValue(current);
+			secret.onChange(async (value) => {
+				setApiKey(this.app, providerId, value);
+				if (value.trim()) {
+					await this.refreshModels(providerId);
+					this.display();
+				}
+			});
+		});
+	}
+
+	private providerStatusText(providerId: ProviderId, state: { models: string[]; fetchedAt: number; lastError?: string }): string {
+		if (state.lastError) {
+			return `✗ ${state.lastError}`;
+		}
+		if (!hasApiKey(this.app, providerId)) {
+			return "No key set.";
+		}
+		if (state.models.length === 0) {
+			return "Key set, no models cached yet — click Refresh.";
+		}
+		const ago = relativeAge(state.fetchedAt);
+		return `✓ ${state.models.length} models loaded · refreshed ${ago}`;
+	}
+
+	private async refreshModels(providerId: ProviderId): Promise<void> {
+		const key = getApiKey(this.app, providerId);
+		if (!key) {
+			new Notice(`No ${providerId} API key set.`);
+			return;
+		}
+		const provider = getProvider(providerId);
+		const state = this.plugin.settings.llmProviders[providerId];
+		try {
+			const models = await provider.listModels(key);
+			state.models = models;
+			state.fetchedAt = Date.now();
+			state.lastError = undefined;
+			new Notice(`${provider.label}: ${models.length} models loaded.`);
+		} catch (e) {
+			state.lastError = (e as Error).message;
+			new Notice(`${provider.label}: ${state.lastError}`);
+		}
+		await this.plugin.saveSettings();
+	}
+
+	private renderTaskModelRow(
+		containerEl: HTMLElement,
+		task: { id: LlmTaskId; label: string; description: string }
+	): void {
+		const current = this.plugin.settings.llmTaskModels[task.id];
+		const setting = new Setting(containerEl).setName(task.label).setDesc(task.description);
+
+		setting.addDropdown((dropdown) => {
+			dropdown.addOption("", "— unconfigured —");
+			for (const { id: providerId, label } of listProviders()) {
+				const models = this.plugin.settings.llmProviders[providerId].models;
+				for (const model of models) {
+					dropdown.addOption(`${providerId}:${model}`, `${label} · ${model}`);
+				}
+			}
+			dropdown.setValue(current ? `${current.provider}:${current.model}` : "");
+			dropdown.onChange(async (value) => {
+				if (!value) {
+					this.plugin.settings.llmTaskModels[task.id] = undefined;
+				} else {
+					// `split(":", 2)` would TRUNCATE the model — JS's split-with-limit
+					// drops trailing chunks. OpenAI fine-tuned IDs like
+					// `ft:gpt-4o-mini:org:foo:abc` need the full string after the
+					// first colon, so split at the first colon manually.
+					const idx = value.indexOf(":");
+					if (idx > 0) {
+						const provider = value.slice(0, idx) as ProviderId;
+						const model = value.slice(idx + 1);
+						this.plugin.settings.llmTaskModels[task.id] = { provider, model };
+					}
+				}
+				await this.plugin.saveSettings();
+			});
+		});
+	}
+}
+
+function relativeAge(ts: number): string {
+	if (!ts) return "never";
+	const sec = Math.floor((Date.now() - ts) / 1000);
+	if (sec < 60) return `${sec}s ago`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m ago`;
+	const hr = Math.floor(min / 60);
+	if (hr < 24) return `${hr}h ago`;
+	const day = Math.floor(hr / 24);
+	return `${day}d ago`;
 }
