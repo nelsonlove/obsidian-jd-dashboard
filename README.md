@@ -2,7 +2,7 @@
 
 Live JD system awareness inside the Obsidian vault. Inbox dashboard, drift detection, vault auditing, frontmatter normalization, and quick ID navigation.
 
-Part of the [jd-tools](https://github.com/nelsonlove/jd-tools) monorepo. Reads the same `jd-index.yaml` and `jd.yaml` that jd-cli uses — no runtime dependency on the Python tool.
+Companion plugin to the [jd-tools](https://github.com/nelsonlove/jd-tools) CLI suite. Reads the same `jd-index.yaml` and `jd.yaml` that jd-cli uses, but has no runtime dependency on it — either tool can be installed and used independently. The two coordinate purely through the shared YAML files.
 
 ## Features
 
@@ -210,7 +210,7 @@ surveyed: 2026-03-31
 ## Development
 
 ```sh
-cd packages/jd-obsidian
+cd ~/repos/jd-obsidian
 npm install
 npm run dev     # watch mode — rebuilds on change
 npm run build   # production build
