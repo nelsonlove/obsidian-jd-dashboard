@@ -109,10 +109,13 @@ export async function createStandardZeros(
 
 /**
  * Categories: folders at depth 2 (inside an area at depth 1) named `XX <name>`.
- * Mirrors the JD_FOLDER_NEEDS_NOTE pattern in folder-notes.ts but for the
- * category level rather than leaf-IDs.
+ * Analogous to `JD_FOLDER_NEEDS_NOTE` in folder-notes.ts but for the category
+ * level rather than leaf-IDs.
  */
 const JD_CATEGORY_FOLDER = /^(\d{2})\s+(.+)$/;
+
+/** Depth at which JD category folders live (area / category). */
+const CATEGORY_DEPTH = 2;
 
 export interface EnsureCategoryIndexesResult {
 	created: number;
@@ -130,8 +133,9 @@ export interface EnsureCategoryIndexesResult {
  * `ensureFolderNotes`.
  *
  * Only the JDex zero (`XX.00`) is created; full standard-zeros scaffolding
- * remains an explicit user action via `JD standard zeros`. We accept any
- * existing `XX.00*.md` filename (custom suffix, etc.) to avoid clobbering.
+ * remains an explicit user action via `JD standard zeros`. Existing index
+ * files are accepted in any of `XX.00 Title.md`, `XX.00.md`, or
+ * `XX.00+SUF Title.md` form so a deliberately renamed JDex isn't clobbered.
  */
 export async function ensureCategoryIndexes(app: App, now: string): Promise<EnsureCategoryIndexesResult> {
 	const allFolders = app.vault
@@ -143,21 +147,35 @@ export async function ensureCategoryIndexes(app: App, now: string): Promise<Ensu
 	for (const folder of allFolders) {
 		const m = folder.name.match(JD_CATEGORY_FOLDER);
 		if (!m) continue;
-		// Categories live at depth 2 (inside a JD area at depth 1).
-		// Without this guard, deeper folders matching `XX <name>`
-		// (e.g. `08.21 QuickAdd scripts/01 ...`) would wrongly self-promote.
-		if (folder.path.split("/").length !== 2) continue;
+		// Categories live at depth 2 (inside a JD area at depth 1). Without
+		// this guard, any deeper folder matching `XX <name>` — e.g. a
+		// hypothetical `10-19 Personal/14 Writing/01 Subdir/` — would wrongly
+		// self-promote to category status.
+		if (folder.path.split("/").length !== CATEGORY_DEPTH) continue;
 
 		const prefix = m[1];
 
-		// Skip if any XX.00 file already exists. Accept custom suffixes
-		// so we don't clobber a deliberately renamed JDex.
-		const hasIndex = folder.children.some(
-			(c) => /^\d{2}\.00(?:\s|\.|$)/.test(c.name) && c.name.endsWith(".md")
-		);
+		// Skip if THIS category's index file already exists. The check binds
+		// to `prefix` so a misfiled `07.00.md` inside `06 Foo/` doesn't
+		// suppress 06's index. We accept any of:
+		//   `XX.00 Title.md` (space), `XX.00.md` (just extension),
+		//   `XX.00+SUF Title.md` (suffix-tagged variant).
+		// String-prefix check rather than dynamic regex (avoids ReDoS via
+		// interpolation, simpler to read).
+		const indexBase = `${prefix}.00`;
+		const hasIndex = folder.children.some((c) => {
+			if (!c.name.endsWith(".md")) return false;
+			if (!c.name.startsWith(indexBase)) return false;
+			const next = c.name.charAt(indexBase.length);
+			return next === " " || next === "." || next === "+";
+		});
 		if (hasIndex) continue;
 
-		const zero = standardZeros(prefix, suffixFor(prefix))[0]; // id "00"
+		// `standardZeros()` doesn't guarantee `00` at index 0 in its public
+		// contract; look it up by id to keep this resilient if the canonical
+		// order is ever reshuffled.
+		const zero = standardZeros(prefix, suffixFor(prefix)).find((z) => z.id === "00");
+		if (!zero) continue; // unreachable given the literal-typed `ZeroId` union
 		const basename = `${prefix}.${zero.id} ${zero.name}`;
 		const targetPath = `${folder.path}/${basename}.md`;
 
