@@ -6,10 +6,13 @@
  * settings via getKeys().
  *
  * Behaviors (gated by toggles):
+ *   - normalizeInferType (does double duty):
+ *       (a) fill in jd-id from filename when missing — required for any
+ *           later inference to fire, since steps 1-2 below need the value
+ *       (b) add inferred type when missing (writes a tag when typeAsTag
+ *           is on; skipped when value is `id` and writeTypeForGenericIds
+ *           is off)
  *   - normalizeQuoteId: wrap unquoted IDs in single quotes
- *   - normalizeInferType: add inferred type when missing (writes a tag
- *       instead when typeAsTag is on; skipped when value is `id` and
- *       writeTypeForGenericIds is off)
  *   - normalizeSortKeys: reorder frontmatter keys into canonical order
  *   - normalizeStripHeadingId: rewrite `# XX.YY Title` as `# Title`
  *

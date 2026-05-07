@@ -1,8 +1,6 @@
 /**
  * Index a folder note: sync `jd-id` on the note + every sibling, then
  * rebuild the `## Contents (Obsidian)` section with bullet links to siblings.
- *
- * Mirrors the QuickAdd `jd-index-folder-note.js` script.
  */
 
 import { type App, Notice, TFile } from "obsidian";
@@ -17,14 +15,30 @@ export async function indexFolderNote(app: App, file: TFile): Promise<void> {
 
 	const allFiles = app.vault.getFiles().filter((f) => f.extension === "md");
 
-	await syncJdId(app, file);
-	const syncCount = await syncJdIds(app, getFolderNoteSiblings(allFiles, file));
+	try {
+		await syncJdId(app, file);
+	} catch (e) {
+		console.warn("[jd] index-folder-note: syncJdId on cover failed", file.path, e);
+	}
+	const syncResult = await syncJdIds(app, getFolderNoteSiblings(allFiles, file));
 
-	const updated = await updateFolderNote(app, file, allFiles);
+	let updated = false;
+	try {
+		updated = await updateFolderNote(app, file, allFiles);
+	} catch (e) {
+		new Notice(`Index folder note: failed — ${(e as Error).message}`);
+		console.warn("[jd] updateFolderNote failed", file.path, e);
+		return;
+	}
 
-	if (updated) {
-		new Notice(`Updated folder note links (${syncCount} jd-ids synced)`);
-	} else {
-		new Notice(`No other notes in this folder (${syncCount} jd-ids synced)`);
+	const errPart = syncResult.failures.length > 0
+		? ` · ${syncResult.failures.length} sync errors (see console)`
+		: "";
+	const baseMsg = updated
+		? `Updated folder note links (${syncResult.synced} jd-ids synced)`
+		: `No other notes in this folder (${syncResult.synced} jd-ids synced)`;
+	new Notice(baseMsg + errPart);
+	if (syncResult.failures.length > 0) {
+		console.warn("[jd] index-folder-note sync errors:", syncResult.failures);
 	}
 }

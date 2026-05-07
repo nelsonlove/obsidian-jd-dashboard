@@ -7,6 +7,10 @@
  * Renames the .md file and the parent folder (if it's a folder cover note),
  * and updates `jd-id` frontmatter. Wikilinks auto-update via
  * `app.fileManager.renameFile`.
+ *
+ * Each rename step is wrapped: a partial failure (e.g. occupant moved but
+ * source didn't) surfaces an explicit Notice describing the inconsistent
+ * state so the user knows to fix it manually.
  */
 
 import { type App, Notice, TFile, TFolder } from "obsidian";
@@ -24,7 +28,7 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 	const currentId = fnMatch[1];
 
 	const newId = await inputPrompt(app, `Renumber ${currentId} → ?`, "XX.YY", currentId);
-	if (!newId) return;
+	if (newId === null) return;
 	const target = newId.trim();
 	if (!ID_RE.test(target)) {
 		new Notice(`Invalid ID: ${newId}`);
@@ -44,6 +48,10 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 			`${target} is in use by "${occupant.basename}"`,
 			"Auto-displace the existing note to the next available ID in its category?"
 		);
+		if (auto === null) {
+			new Notice("Renumber cancelled");
+			return;
+		}
 		if (auto) {
 			displaceId = nextAvailableId(app, target.slice(0, 2));
 			if (!displaceId) {
@@ -52,7 +60,10 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 			}
 		} else {
 			const manual = await inputPrompt(app, `New ID for "${occupant.basename}"`, "XX.YY");
-			if (!manual) return;
+			if (manual === null) {
+				new Notice("Renumber cancelled");
+				return;
+			}
 			if (!ID_RE.test(manual.trim())) {
 				new Notice(`Invalid displacement ID: ${manual}`);
 				return;
@@ -63,10 +74,26 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 				return;
 			}
 		}
-		await renumber(app, occupant, displaceId);
+
+		try {
+			await renumber(app, occupant, displaceId);
+		} catch (e) {
+			new Notice(`Renumber: failed to displace occupant — ${(e as Error).message}. Source unchanged.`);
+			console.error("[jd] renumber: occupant displacement failed", e);
+			return;
+		}
 	}
 
-	await renumber(app, file, target);
+	try {
+		await renumber(app, file, target);
+	} catch (e) {
+		const inconsistencyNote = occupant
+			? ` Occupant was already moved to ${displaceId} — vault is in inconsistent state.`
+			: "";
+		new Notice(`Renumber: source rename failed — ${(e as Error).message}.${inconsistencyNote}`);
+		console.error("[jd] renumber: source rename failed", e);
+		return;
+	}
 
 	new Notice(
 		occupant
@@ -117,14 +144,26 @@ async function renumber(app: App, file: TFile, newId: string): Promise<void> {
 		const grandparentPath = parent.parent && parent.parent.path !== "/" ? parent.parent.path : "";
 		const newFolderPath = grandparentPath ? `${grandparentPath}/${newBasename}` : newBasename;
 		await app.fileManager.renameFile(parent as TFolder, newFolderPath);
-		await app.fileManager.renameFile(file, `${newFolderPath}/${newBasename}.md`);
+		try {
+			await app.fileManager.renameFile(file, `${newFolderPath}/${newBasename}.md`);
+		} catch (e) {
+			throw new Error(
+				`folder renamed to '${newFolderPath}' but cover-note rename failed: ${(e as Error).message}`
+			);
+		}
 	} else {
 		const parentPath = parent && parent.path !== "/" ? parent.path : "";
 		const newPath = parentPath ? `${parentPath}/${newBasename}.md` : `${newBasename}.md`;
 		await app.fileManager.renameFile(file, newPath);
 	}
 
-	await app.fileManager.processFrontMatter(file, (fm) => {
-		fm["jd-id"] = newId;
-	});
+	try {
+		await app.fileManager.processFrontMatter(file, (fm) => {
+			fm["jd-id"] = newId;
+		});
+	} catch (e) {
+		throw new Error(
+			`renamed to '${newBasename}' but jd-id frontmatter update failed: ${(e as Error).message}`
+		);
+	}
 }

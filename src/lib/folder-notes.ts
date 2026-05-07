@@ -59,24 +59,35 @@ linter-yaml-title-alias: ${title}
 `;
 }
 
+export interface EnsureFolderNotesResult {
+	created: number;
+	failures: { path: string; error: string }[];
+}
+
 /**
  * Walk the vault for JD-named folders that lack a folder note and create
- * a minimal one for each. Returns the count created.
+ * a minimal one for each. Per-folder errors are collected, not thrown —
+ * one bad folder shouldn't kill the whole sweep.
  */
-export async function ensureFolderNotes(app: App, now: string): Promise<number> {
+export async function ensureFolderNotes(app: App, now: string): Promise<EnsureFolderNotesResult> {
 	const allFolders = app.vault
 		.getAllLoadedFiles()
 		.filter((f): f is TFolder => f instanceof TFolderClass);
 
-	let created = 0;
+	const result: EnsureFolderNotesResult = { created: 0, failures: [] };
 	for (const folder of allFolders) {
 		const m = folder.name.match(JD_FOLDER_NEEDS_NOTE);
 		if (!m) continue;
 		const [, jdId, title] = m;
 		const folderNotePath = `${folder.path}/${folder.name}.md`;
 		if (app.vault.getAbstractFileByPath(folderNotePath)) continue;
-		await app.vault.create(folderNotePath, buildLeafFolderNote(jdId, title, now));
-		created++;
+		try {
+			await app.vault.create(folderNotePath, buildLeafFolderNote(jdId, title, now));
+			result.created++;
+		} catch (e) {
+			result.failures.push({ path: folderNotePath, error: (e as Error).message });
+			console.warn("[jd] ensureFolderNotes failed", folderNotePath, e);
+		}
 	}
-	return created;
+	return result;
 }

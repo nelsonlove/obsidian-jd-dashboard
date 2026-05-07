@@ -25,8 +25,10 @@ export const openai: LlmProvider = {
 		if (res.status >= 400) {
 			throw new Error(`OpenAI ${res.status}: ${extractError(res.json)}`);
 		}
-		const data = res.json?.data ?? [];
-		const ids: string[] = data.map((m: { id: string }) => m.id);
+		if (!res.json || !Array.isArray(res.json.data)) {
+			throw new Error(`OpenAI 200 but unexpected response shape: ${truncate(res.text, 200)}`);
+		}
+		const ids: string[] = res.json.data.map((m: { id: string }) => m.id);
 		// Filter out non-chat models (embeddings, audio, image gen) — keep
 		// anything that looks like a chat model. Heuristic but covers the
 		// common cases without hardcoding model names that change quarterly.
@@ -53,10 +55,18 @@ export const openai: LlmProvider = {
 		if (res.status >= 400) {
 			throw new Error(`OpenAI ${res.status}: ${extractError(res.json)}`);
 		}
-		const text = res.json?.choices?.[0]?.message?.content ?? "";
-		return String(text).trim();
+		const content = res.json?.choices?.[0]?.message?.content;
+		if (typeof content !== "string" || !content.trim()) {
+			throw new Error(`OpenAI 200 but no choice content: ${truncate(res.text, 200)}`);
+		}
+		return content.trim();
 	},
 };
+
+function truncate(s: string | undefined, n: number): string {
+	if (!s) return "(empty body)";
+	return s.length > n ? `${s.slice(0, n)}…` : s;
+}
 
 function extractError(body: unknown): string {
 	if (body && typeof body === "object" && "error" in body) {

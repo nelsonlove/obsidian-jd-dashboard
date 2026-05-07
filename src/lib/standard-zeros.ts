@@ -1,14 +1,19 @@
 /**
  * Standard-zeros (`XX.00`–`XX.09`) generation for JD categories.
- * Mirrors the QuickAdd `jd-lib.js` shape so behavior stays consistent.
+ *
+ * The full set is fixed: `00, 01, 02, 03, 04, 05, 06, 08, 09` (note: `07`
+ * is reserved per JD canon and intentionally absent). The literal type
+ * `ZeroId` documents and enforces this.
  */
 
-import type { App, TFolder } from "obsidian";
+import type { App } from "obsidian";
+
+export type ZeroId = "00" | "01" | "02" | "03" | "04" | "05" | "06" | "08" | "09";
 
 export interface ZeroSpec {
-	id: string;
+	id: ZeroId;
 	name: string;
-	tag: string;
+	tag: `jd/${string}`;
 	hasDir: boolean;
 }
 
@@ -62,16 +67,21 @@ export interface FolderLike {
 	name: string;
 }
 
+export interface CreateZerosResult {
+	created: number;
+	skipped: number;
+	failures: { name: string; error: string }[];
+}
+
 export async function createStandardZeros(
 	app: App,
 	folder: FolderLike,
 	prefix: string,
 	now: string
-): Promise<{ created: number; skipped: number }> {
+): Promise<CreateZerosResult> {
 	const suffix = suffixFor(prefix);
 	const zeros = standardZeros(prefix, suffix);
-	let created = 0;
-	let skipped = 0;
+	const result: CreateZerosResult = { created: 0, skipped: 0, failures: [] };
 
 	for (const zero of zeros) {
 		const basename = `${prefix}.${zero.id} ${zero.name}`;
@@ -80,13 +90,18 @@ export async function createStandardZeros(
 			: `${folder.path}/${basename}.md`;
 
 		if (app.vault.getAbstractFileByPath(filepath)) {
-			skipped++;
+			result.skipped++;
 			continue;
 		}
 
-		await app.vault.create(filepath, buildZeroFrontmatter(zero, prefix, folder.name, now));
-		created++;
+		try {
+			await app.vault.create(filepath, buildZeroFrontmatter(zero, prefix, folder.name, now));
+			result.created++;
+		} catch (e) {
+			result.failures.push({ name: basename, error: (e as Error).message });
+			console.warn("[jd] createStandardZeros failed", filepath, e);
+		}
 	}
 
-	return { created, skipped };
+	return result;
 }

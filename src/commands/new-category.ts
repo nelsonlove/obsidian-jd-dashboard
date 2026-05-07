@@ -2,7 +2,7 @@
  * Create a new JD category in the active area: walks up from the active
  * note to find the area folder, picks the next free category number,
  * prompts for a name, creates the folder + standard zeros, opens the
- * new index note.
+ * new index note. Surfaces partial-creation failures.
  */
 
 import { type App, Notice, TFile, TFolder, moment } from "obsidian";
@@ -52,20 +52,40 @@ export async function newCategoryCommand(app: App, file: TFile): Promise<void> {
 		`New category in ${areaFolder.name} (next: ${String(nextNum).padStart(2, "0")})`,
 		"Category name"
 	);
-	if (!name || !name.trim()) return;
+	if (name === null) return;
+	if (!name.trim()) {
+		new Notice("Category name cannot be empty");
+		return;
+	}
 
 	const prefix = String(nextNum).padStart(2, "0");
 	const folderName = `${prefix} ${name.trim()}`;
 	const folderPath = `${areaFolder.path}/${folderName}`;
 	const now = moment().format("YYYY-MM-DDTHH:mm");
 
-	await createStandardZeros(app, { path: folderPath, name: folderName }, prefix, now);
+	const result = await createStandardZeros(
+		app,
+		{ path: folderPath, name: folderName },
+		prefix,
+		now
+	);
+	if (result.failures.length > 0) {
+		new Notice(
+			`Created ${folderName} but ${result.failures.length}/${result.failures.length + result.created} zeros failed — see console`
+		);
+		console.warn("[jd] new-category partial:", result.failures);
+		return;
+	}
 
 	const suffix = suffixFor(prefix);
 	const indexPath = `${folderPath}/${prefix}.00 JDex ${suffix}.md`;
 	const indexFile = app.vault.getAbstractFileByPath(indexPath);
 	if (indexFile instanceof TFile) {
 		await app.workspace.getLeaf().openFile(indexFile);
+	} else {
+		new Notice(`Created ${folderName}, but index file not found at expected path`);
+		console.warn("[jd] new-category: expected index file missing", indexPath);
+		return;
 	}
 
 	new Notice(`Created ${folderName} with standard zeros`);

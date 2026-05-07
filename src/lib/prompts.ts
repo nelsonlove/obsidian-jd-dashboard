@@ -1,6 +1,11 @@
 /**
- * Modal-based replacements for QuickAdd's `inputPrompt` / `yesNoPrompt`.
- * Each returns a Promise that resolves to the user's answer or `null` on cancel.
+ * Modal-based replacements for QuickAdd's interactive prompts.
+ *
+ * - `inputPrompt` — single-line text input. Resolves to the entered string,
+ *   or `null` on cancel/dismiss (Esc, click-away, Cancel button).
+ * - `confirmPrompt` — yes/no question. Resolves to `true` for Yes, `false`
+ *   for No, `null` for cancel/dismiss. Callers should distinguish No from
+ *   cancel where it matters (e.g. renumber's auto-displace prompt).
  */
 
 import { App, Modal, Setting } from "obsidian";
@@ -16,7 +21,11 @@ export function inputPrompt(
 	});
 }
 
-export function confirmPrompt(app: App, title: string, message: string): Promise<boolean> {
+export function confirmPrompt(
+	app: App,
+	title: string,
+	message: string
+): Promise<boolean | null> {
 	return new Promise((resolve) => {
 		new ConfirmPromptModal(app, title, message, resolve).open();
 	});
@@ -82,7 +91,7 @@ class ConfirmPromptModal extends Modal {
 		app: App,
 		private title: string,
 		private message: string,
-		private resolveFn: (v: boolean) => void
+		private resolveFn: (v: boolean | null) => void
 	) {
 		super(app);
 	}
@@ -105,7 +114,10 @@ class ConfirmPromptModal extends Modal {
 	}
 
 	onClose(): void {
-		this.resolveFn(this.answer ?? false);
+		// Resolves to null if user dismissed without clicking Yes/No; this
+		// distinguishes "cancel" from an explicit "No" — important for
+		// flows like renumber that branch on the response.
+		this.resolveFn(this.answer);
 		this.contentEl.empty();
 	}
 }

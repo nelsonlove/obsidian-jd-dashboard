@@ -21,12 +21,31 @@ import { renumberCommand } from "./commands/renumber";
 import { indexFolderNote } from "./commands/index-folder-note";
 import { standardZerosCommand } from "./commands/standard-zeros";
 import { newCategoryCommand } from "./commands/new-category";
+import {
+	newGenericIdFromTemplate,
+	newStandardZeroFromTemplate,
+	newStemFromTemplate,
+} from "./commands/new-from-template";
 import { indexVault, indexCategory } from "./commands/index-vault";
 import { scanDrift } from "./scanner";
 import { parseJDex, parseJDConfig, type JDex, type JDConfig } from "./jdex";
 import { FrontmatterNormalizer } from "./normalizer";
 import { getKeys } from "./keys";
 import { readFileSync, watchFile, unwatchFile } from "fs";
+
+/**
+ * Wrap a command body so any uncaught rejection surfaces a Notice and a
+ * console error, rather than silently disappearing as an unhandled
+ * promise. Use for every command-palette dispatch.
+ */
+function runCmd(name: string, p: Promise<unknown> | (() => Promise<unknown>)): void {
+	const promise = typeof p === "function" ? p() : p;
+	promise.catch((e: unknown) => {
+		const msg = e instanceof Error ? e.message : String(e);
+		console.error("[jd] command failed:", name, e);
+		new Notice(name + ": " + msg);
+	});
+}
 
 export default class JDDashboardPlugin extends Plugin {
 	settings: JDSettings = DEFAULT_SETTINGS;
@@ -89,23 +108,25 @@ export default class JDDashboardPlugin extends Plugin {
 		this.addCommand({
 			id: "drift-report",
 			name: "Generate drift report",
-			callback: () => generateDriftReport(this.app, this.jdex, this.settings),
+			callback: () => runCmd("Generate drift report", () => generateDriftReport(this.app, this.jdex, this.settings)),
 		});
 
 		this.addCommand({
 			id: "vault-audit",
 			name: "Run vault audit",
 			callback: () =>
-				generateAuditReport(this.app, this.jdex, this.settings, {
-					staleDays: this.settings.staleDays,
-					jdConfig: this.jdConfig,
-				}),
+				runCmd("Run vault audit", () =>
+					generateAuditReport(this.app, this.jdex, this.settings, {
+						staleDays: this.settings.staleDays,
+						jdConfig: this.jdConfig,
+					})
+				),
 		});
 
 		this.addCommand({
 			id: "migrate-readme",
 			name: "Migrate +README files to folder-named cover notes",
-			callback: () => migrateReadmeFiles(this.app, getKeys(this.settings)),
+			callback: () => runCmd("Migrate +README files", () => migrateReadmeFiles(this.app, getKeys(this.settings))),
 		});
 
 		this.addCommand({
@@ -116,7 +137,8 @@ export default class JDDashboardPlugin extends Plugin {
 					new Notice("JDex not loaded — check JDex path setting.");
 					return;
 				}
-				renderCategoryJdex(this.app, this.jdex, this.settings);
+				const jdex = this.jdex;
+				runCmd("Render category JDex contents", () => renderCategoryJdex(this.app, jdex, this.settings));
 			},
 		});
 
@@ -134,7 +156,7 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file) return false;
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
-				promoteToFolder(this.app, file);
+				runCmd("Promote note to folder", () => promoteToFolder(this.app, file));
 				return true;
 			},
 		});
@@ -147,7 +169,7 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file) return false;
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
-				renderFiles(this.app, this.settings, file);
+				runCmd("Render filesystem contents", () => renderFiles(this.app, this.settings, file));
 				return true;
 			},
 		});
@@ -160,7 +182,7 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file) return false;
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
-				renumberCommand(this.app, file);
+				runCmd("Renumber active note", () => renumberCommand(this.app, file));
 				return true;
 			},
 		});
@@ -173,7 +195,7 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file) return false;
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
-				indexFolderNote(this.app, file);
+				runCmd("Index folder note", () => indexFolderNote(this.app, file));
 				return true;
 			},
 		});
@@ -186,7 +208,7 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file) return false;
 				if (!/^\d{2}\.00\b/.test(file.basename)) return false;
 				if (checking) return true;
-				indexCategory(this.app, file);
+				runCmd("Index category", () => indexCategory(this.app, file));
 				return true;
 			},
 		});
@@ -194,7 +216,7 @@ export default class JDDashboardPlugin extends Plugin {
 		this.addCommand({
 			id: "index-vault",
 			name: "Index entire vault",
-			callback: () => indexVault(this.app),
+			callback: () => runCmd("Index entire vault", () => indexVault(this.app)),
 		});
 
 		this.addCommand({
@@ -204,7 +226,7 @@ export default class JDDashboardPlugin extends Plugin {
 				const file = this.app.workspace.getActiveFile();
 				if (!file) return false;
 				if (checking) return true;
-				standardZerosCommand(this.app, file);
+				runCmd("Create standard zeros", () => standardZerosCommand(this.app, file));
 				return true;
 			},
 		});
@@ -216,7 +238,44 @@ export default class JDDashboardPlugin extends Plugin {
 				const file = this.app.workspace.getActiveFile();
 				if (!file) return false;
 				if (checking) return true;
-				newCategoryCommand(this.app, file);
+				runCmd("New category", () => newCategoryCommand(this.app, file));
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "new-standard-zero",
+			name: "New standard zero in current category",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (checking) return true;
+				runCmd("New standard zero", () => newStandardZeroFromTemplate(this.app, file, this.settings));
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "new-id-from-template",
+			name: "New ID in current category",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (checking) return true;
+				runCmd("New ID", () => newGenericIdFromTemplate(this.app, file, this.settings));
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "new-stem",
+			name: "New stem for current JDex",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!/^\d{2}\.00\b/.test(file.basename)) return false;
+				if (checking) return true;
+				runCmd("New stem", () => newStemFromTemplate(this.app, file, this.settings));
 				return true;
 			},
 		});

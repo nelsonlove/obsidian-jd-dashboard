@@ -9,14 +9,18 @@
 
 import { type App, TFile } from "obsidian";
 
+/**
+ * Read the existing `created:` line from a file's frontmatter, falling back
+ * to `fallback` if the file doesn't exist yet. A read-failure on an
+ * existing file (permission denied, encoding error) THROWS rather than
+ * silently substituting the fallback — we don't want to overwrite the
+ * historical creation date with `now` because we couldn't read it.
+ */
 export async function getCreatedDate(app: App, file: TFile, fallback: string): Promise<string> {
-	try {
-		const existing = await app.vault.read(file);
-		const match = existing.match(/^created:\s*(.+)$/m);
-		if (match) return match[1].trim();
-	} catch {
-		// new or unreadable
-	}
+	if (!app.vault.getAbstractFileByPath(file.path)) return fallback;
+	const existing = await app.vault.read(file);
+	const match = existing.match(/^created:\s*(.+)$/m);
+	if (match) return match[1].trim();
 	return fallback;
 }
 
@@ -55,9 +59,19 @@ export function buildLinks(files: TFile[]): string {
 		.join("\n");
 }
 
-export function getCategoryFiles(allFiles: TFile[], prefix: string, folderPath: string): TFile[] {
+/**
+ * Returns category-member files, EXCLUDING the index file itself (otherwise
+ * the regenerated JDex would contain a wikilink back to itself).
+ */
+export function getCategoryFiles(
+	allFiles: TFile[],
+	prefix: string,
+	folderPath: string,
+	excludePath?: string
+): TFile[] {
 	return allFiles
 		.filter((f) => {
+			if (excludePath && f.path === excludePath) return false;
 			if (!f.basename.startsWith(prefix)) return false;
 			if (!f.parent || !f.parent.path.startsWith(folderPath)) return false;
 			return true;
@@ -77,7 +91,7 @@ export async function reindexCategory(
 	const prefix = prefixMatch[1];
 	const folder = indexFile.parent;
 	if (!folder) return;
-	const catFiles = getCategoryFiles(allFiles, prefix, folder.path);
+	const catFiles = getCategoryFiles(allFiles, prefix, folder.path, indexFile.path);
 	const createdDate = await getCreatedDate(app, indexFile, now);
 	const title = `JDex for category ${prefix}`;
 

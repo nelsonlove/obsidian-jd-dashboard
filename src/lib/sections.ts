@@ -9,6 +9,11 @@
  * the heading line up to (but not including) the next top-level `##`
  * heading, the `^contents` anchor, or EOF — whichever comes first. Inserts
  * a new section at the end of the file if the heading isn't found.
+ *
+ * (`^contents` is a block-ref some pre-flat-schema folder notes placed at
+ * the bottom of the auto-managed region. New code doesn't emit it, but
+ * legacy notes still in the wild use it as a section terminator — we
+ * honor that boundary so we don't bulldoze custom prose appearing after.)
  */
 export function setSection(content: string, heading: string, body: string): string {
 	const lines = content.split("\n");

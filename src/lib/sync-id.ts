@@ -2,6 +2,10 @@
  * `jd-id` frontmatter sync from filename. The on-save normalizer handles
  * single-file sync inline; these helpers exist for batch operations
  * (index-vault, index-folder-note) that need to fix many files at once.
+ *
+ * Per-file errors are collected, not thrown. Most likely cause is malformed
+ * YAML in a single note (often the very thing the user is running the
+ * sync to fix); aborting the whole batch on one bad file is the wrong call.
  */
 
 import type { App, TFile } from "obsidian";
@@ -22,10 +26,20 @@ export async function syncJdId(app: App, file: TFile): Promise<boolean> {
 	return true;
 }
 
-export async function syncJdIds(app: App, files: TFile[]): Promise<number> {
-	let count = 0;
+export interface SyncJdIdsResult {
+	synced: number;
+	failures: { path: string; error: string }[];
+}
+
+export async function syncJdIds(app: App, files: TFile[]): Promise<SyncJdIdsResult> {
+	const result: SyncJdIdsResult = { synced: 0, failures: [] };
 	for (const file of files) {
-		if (await syncJdId(app, file)) count++;
+		try {
+			if (await syncJdId(app, file)) result.synced++;
+		} catch (e) {
+			result.failures.push({ path: file.path, error: (e as Error).message });
+			console.warn("[jd] syncJdId failed", file.path, e);
+		}
 	}
-	return count;
+	return result;
 }

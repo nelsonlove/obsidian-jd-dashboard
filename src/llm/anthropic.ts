@@ -27,8 +27,10 @@ export const anthropic: LlmProvider = {
 		if (res.status >= 400) {
 			throw new Error(`Anthropic ${res.status}: ${extractError(res.json)}`);
 		}
-		const data = res.json?.data ?? [];
-		return data.map((m: { id: string }) => m.id);
+		if (!res.json || !Array.isArray(res.json.data)) {
+			throw new Error(`Anthropic 200 but unexpected response shape: ${truncate(res.text, 200)}`);
+		}
+		return res.json.data.map((m: { id: string }) => m.id);
 	},
 
 	async complete({ apiKey, model, prompt, maxTokens }): Promise<string> {
@@ -50,14 +52,25 @@ export const anthropic: LlmProvider = {
 		if (res.status >= 400) {
 			throw new Error(`Anthropic ${res.status}: ${extractError(res.json)}`);
 		}
-		const blocks = res.json?.content ?? [];
+		const blocks = res.json?.content;
+		if (!Array.isArray(blocks) || blocks.length === 0) {
+			throw new Error(`Anthropic 200 but no content blocks: ${truncate(res.text, 200)}`);
+		}
 		const text = blocks
 			.filter((b: { type: string }) => b.type === "text")
 			.map((b: { text: string }) => b.text)
 			.join("");
+		if (!text.trim()) {
+			throw new Error(`Anthropic 200 with empty text: ${truncate(res.text, 200)}`);
+		}
 		return text.trim();
 	},
 };
+
+function truncate(s: string | undefined, n: number): string {
+	if (!s) return "(empty body)";
+	return s.length > n ? `${s.slice(0, n)}…` : s;
+}
 
 function extractError(body: unknown): string {
 	if (body && typeof body === "object" && "error" in body) {

@@ -25,8 +25,10 @@ export function getApiKey(app: App, provider: ProviderId): string | null {
 }
 
 export function setApiKey(app: App, provider: ProviderId, key: string): void {
-	// SecretStorage has no explicit delete — setting an empty string is
-	// the documented way to clear an entry.
+	// SecretStorage has no explicit delete API; setting an empty string is
+	// the closest "clear" the API offers (the slot still appears in
+	// `listSecrets()` but `getSecret()` returns ""). `hasApiKey()` treats
+	// empty as absent.
 	app.secretStorage.setSecret(secretId(provider), key);
 }
 

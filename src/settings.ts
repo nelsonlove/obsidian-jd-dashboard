@@ -8,13 +8,16 @@ import { getProvider, listProviders, type ProviderId } from "./llm/provider";
 import { getApiKey, hasApiKey, setApiKey } from "./llm/secrets";
 
 /** Registry of LLM-driven tasks. Add a row here to expose a new per-task model picker. */
-export const LLM_TASKS: { id: string; label: string; description: string }[] = [
+export const LLM_TASKS = [
 	{
 		id: "renderFiles",
 		label: "Render filesystem contents",
 		description: "Used by the JD: Render filesystem contents command.",
 	},
-];
+] as const satisfies readonly { id: string; label: string; description: string }[];
+
+/** Union of valid task IDs, derived from LLM_TASKS so typos are caught at compile time. */
+export type LlmTaskId = (typeof LLM_TASKS)[number]["id"];
 
 export interface JDSettings {
 	// ── Paths ────────────────────────────────────────────────────
@@ -24,6 +27,8 @@ export interface JDSettings {
 	jdexPath: string;
 	/** Absolute path to jd.yaml (config — expanded areas, etc.) */
 	jdConfigPath: string;
+	/** Vault-relative path to the JD templates folder (read by new-from-template commands) */
+	templatesFolder: string;
 
 	// ── Dashboard ────────────────────────────────────────────────
 	/** Show inbox items with count 0 */
@@ -85,8 +90,10 @@ export interface JDSettings {
 	/**
 	 * Per-task model assignment. Each LLM-driven command picks its model
 	 * from this map; a missing entry means the command is unconfigured.
+	 * Keys are constrained to `LlmTaskId` so a typo (`renderFile` vs
+	 * `renderFiles`) fails to compile rather than silently doing nothing.
 	 */
-	llmTaskModels: Record<string, TaskModel | undefined>;
+	llmTaskModels: Partial<Record<LlmTaskId, TaskModel>>;
 
 	/**
 	 * Override prompt for the render-files command. Empty string falls
@@ -110,6 +117,7 @@ export const DEFAULT_SETTINGS: JDSettings = {
 	jdRoot: "~/Documents",
 	jdexPath: "~/.local/share/jd/jd-index.yaml",
 	jdConfigPath: "~/.config/jd/jd.yaml",
+	templatesFolder: "00-09 System/00 System management/00.03 Templates for the system",
 	showEmptyInboxes: false,
 	staleDays: 90,
 	auditOnStartup: false,
@@ -213,6 +221,21 @@ export class JDSettingsTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.jdConfigPath)
 					.onChange(async (value) => {
 						this.plugin.settings.jdConfigPath = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Templates folder")
+			.setDesc(
+				"Vault-relative path to the JD templates folder. Read by 'New standard zero', 'New ID', and 'New stem' commands."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("00-09 System/00 System management/00.03 Templates for the system")
+					.setValue(this.plugin.settings.templatesFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.templatesFolder = value;
 						await this.plugin.saveSettings();
 					})
 			);
@@ -579,7 +602,7 @@ export class JDSettingsTab extends PluginSettingTab {
 
 	private renderTaskModelRow(
 		containerEl: HTMLElement,
-		task: { id: string; label: string; description: string }
+		task: { id: LlmTaskId; label: string; description: string }
 	): void {
 		const current = this.plugin.settings.llmTaskModels[task.id];
 		const setting = new Setting(containerEl).setName(task.label).setDesc(task.description);
@@ -597,8 +620,16 @@ export class JDSettingsTab extends PluginSettingTab {
 				if (!value) {
 					this.plugin.settings.llmTaskModels[task.id] = undefined;
 				} else {
-					const [provider, model] = value.split(":", 2) as [ProviderId, string];
-					this.plugin.settings.llmTaskModels[task.id] = { provider, model };
+					// `split(":", 2)` would TRUNCATE the model — JS's split-with-limit
+					// drops trailing chunks. OpenAI fine-tuned IDs like
+					// `ft:gpt-4o-mini:org:foo:abc` need the full string after the
+					// first colon, so split at the first colon manually.
+					const idx = value.indexOf(":");
+					if (idx > 0) {
+						const provider = value.slice(0, idx) as ProviderId;
+						const model = value.slice(idx + 1);
+						this.plugin.settings.llmTaskModels[task.id] = { provider, model };
+					}
 				}
 				await this.plugin.saveSettings();
 			});
