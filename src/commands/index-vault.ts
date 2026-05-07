@@ -11,6 +11,7 @@
 
 import { type App, Notice, TFile, moment } from "obsidian";
 import { ensureFolderNotes, updateFolderNote } from "../lib/folder-notes";
+import { ensureCategoryIndexes } from "../lib/standard-zeros";
 import { syncJdIds } from "../lib/sync-id";
 import {
 	buildFrontmatter,
@@ -41,7 +42,11 @@ export async function indexVault(app: App): Promise<void> {
 
 	const failures: Failures = { indexes: [], folderNotes: [] };
 
-	// 0. Auto-create folder notes for JD-named folders missing one.
+	// 0a. Auto-create XX.00 index files for JD category folders missing one.
+	//     Without these, the next pass cannot enumerate the category at all.
+	const categoryIndexResult = await ensureCategoryIndexes(app, now);
+
+	// 0b. Auto-create folder notes for JD leaf-ID folders missing one.
 	const folderResult = await ensureFolderNotes(app, now);
 
 	// Refresh file list after potential creations.
@@ -134,17 +139,20 @@ export async function indexVault(app: App): Promise<void> {
 	const errCount =
 		failures.indexes.length +
 		failures.folderNotes.length +
+		categoryIndexResult.failures.length +
 		folderResult.failures.length +
 		syncResult.failures.length;
 	const errPart = errCount > 0 ? ` · ${errCount} errors (see console)` : "";
 	new Notice(
 		`Reindexed ${rewriteCount} indexes, ${folderNoteCount} folder notes updated, ` +
-		`${folderResult.created} new folder notes created, ${syncResult.synced} IDs synced${errPart}`
+		`${categoryIndexResult.created} new category indexes, ` +
+		`${folderResult.created} new folder notes, ${syncResult.synced} IDs synced${errPart}`
 	);
 	if (errCount > 0) {
 		console.warn("[jd] indexVault errors:", {
 			indexes: failures.indexes,
 			folderNotes: failures.folderNotes,
+			ensureCategoryIndexes: categoryIndexResult.failures,
 			ensureFolderNotes: folderResult.failures,
 			syncJdIds: syncResult.failures,
 		});
