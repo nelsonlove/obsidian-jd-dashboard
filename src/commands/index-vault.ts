@@ -89,8 +89,7 @@ export async function indexVault(app: App): Promise<void> {
 		const content =
 			buildFrontmatter(title, "00.00", createdDate, modifiedNow, systemCat.folder.name) +
 			`\n# ${title}\n\n` +
-			body +
-			`^contents\n`;
+			body;
 
 		await app.vault.modify(systemCat.indexFile, content);
 		rewriteCount++;

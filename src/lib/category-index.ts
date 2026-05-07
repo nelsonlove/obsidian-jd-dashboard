@@ -85,7 +85,7 @@ export async function reindexCategory(
 		buildFrontmatter(title, `${prefix}.00`, createdDate, modifiedNow, folder.name) +
 		`\n# ${title}\n\n` +
 		buildLinks(catFiles) +
-		`\n\n^contents\n`;
+		`\n`;
 
 	await app.vault.modify(indexFile, content);
 }
