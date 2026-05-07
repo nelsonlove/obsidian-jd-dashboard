@@ -6,7 +6,8 @@
  *   - newGenericIdFromTemplate:    prompt for ID + title, create XX.YY Name.md.
  *   - newStemFromTemplate:         pick a stem code, prompt for name, create XX.00+CODE Name.md.
  *
- * All three read templates from settings.templatesFolder.
+ * All three read templates from settings.templatesFolder. User-supplied titles
+ * are sanitized via `sanitizeTitle` before reaching the destination path.
  */
 
 import { type App, Notice, SuggestModal, TFile, TFolder } from "obsidian";
@@ -24,6 +25,7 @@ import {
 	findZeroTemplate,
 	listStemCodes,
 	listTemplates,
+	sanitizeTitle,
 } from "../lib/templates";
 
 // ── Category detection ───────────────────────────────────────────
@@ -31,7 +33,6 @@ import {
 interface CategoryContext {
 	folder: TFolder;
 	prefix: string;
-	folderName: string;
 }
 
 function findCategoryFolder(file: TFile): CategoryContext | null {
@@ -39,7 +40,7 @@ function findCategoryFolder(file: TFile): CategoryContext | null {
 	while (cur && cur.path !== "/") {
 		const m = cur.name.match(/^(\d{2})\s/);
 		if (m) {
-			return { folder: cur, prefix: m[1], folderName: cur.name };
+			return { folder: cur, prefix: m[1] };
 		}
 		cur = cur.parent;
 	}
@@ -114,7 +115,7 @@ class StemPickerModal extends SuggestModal<string> {
 	getSuggestions(query: string): string[] {
 		const q = query.toUpperCase().trim();
 		if (!q) return this.codes;
-		return this.codes.filter((c) => c.includes(q));
+		return this.codes.filter((c) => c.toUpperCase().includes(q));
 	}
 
 	renderSuggestion(item: string, el: HTMLElement): void {
@@ -123,6 +124,36 @@ class StemPickerModal extends SuggestModal<string> {
 
 	onChooseSuggestion(item: string): void {
 		this.onChoice(item);
+	}
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+
+/**
+ * Create the file from template, then try to open it. If the create succeeds
+ * but the open fails, surface that explicitly so the user knows the file
+ * exists (and where) — they shouldn't think creation failed and retry.
+ */
+async function createAndOpen(
+	app: App,
+	template: Parameters<typeof createFromTemplate>[1],
+	ctx: Parameters<typeof createFromTemplate>[2],
+	destPath: string,
+	successLabel: string
+): Promise<void> {
+	let created: TFile;
+	try {
+		created = await createFromTemplate(app, template, ctx, destPath);
+	} catch (e) {
+		new Notice(`Create failed: ${(e as Error).message}`);
+		return;
+	}
+	new Notice(`Created ${successLabel}`);
+	try {
+		await app.workspace.getLeaf().openFile(created);
+	} catch (e) {
+		console.warn("[jd] new-from-template: created but openFile failed", created.path, e);
+		new Notice(`Created — but couldn't open. Find at: ${created.path}`);
 	}
 }
 
@@ -161,17 +192,11 @@ export async function newStandardZeroFromTemplate(
 		const ctx = buildContext({
 			prefix: cat.prefix,
 			id: choice.zero.id,
-			folder: { path: cat.folder.path, name: cat.folderName },
+			folder: { path: cat.folder.path, name: cat.folder.name },
 			zero: choice.zero,
 		});
 		const destPath = destPathForZero({ path: cat.folder.path }, cat.prefix, choice.zero);
-		try {
-			const { file: created } = await createFromTemplate(app, template, ctx, destPath);
-			await app.workspace.getLeaf().openFile(created);
-			new Notice(`Created ${choice.zero.name}`);
-		} catch (e) {
-			new Notice(`Failed: ${(e as Error).message}`);
-		}
+		await createAndOpen(app, template, ctx, destPath, choice.zero.name);
 	}).open();
 }
 
@@ -186,16 +211,25 @@ export async function newGenericIdFromTemplate(
 		return;
 	}
 
-	const idRaw = await inputPrompt(app, `New ID in ${cat.folderName}`, "ID number (e.g. 10)");
-	if (!idRaw) return;
+	const idRaw = await inputPrompt(app, `New ID in ${cat.folder.name}`, "ID number (e.g. 10)");
+	if (idRaw === null) return; // cancelled
+	if (!idRaw.trim()) {
+		new Notice("ID cannot be empty");
+		return;
+	}
 	const id = idRaw.trim().padStart(2, "0");
 	if (!/^\d{2}$/.test(id)) {
-		new Notice("ID must be two digits");
+		new Notice(`ID must be two digits: ${idRaw}`);
 		return;
 	}
 
-	const title = await inputPrompt(app, "Title for the new ID", "e.g. Config files");
-	if (!title || !title.trim()) return;
+	const titleRaw = await inputPrompt(app, "Title for the new ID", "e.g. Config files");
+	if (titleRaw === null) return; // cancelled
+	const title = sanitizeTitle(titleRaw);
+	if (!title) {
+		new Notice("Title is empty or contains invalid characters (/, \\, .., :, etc.)");
+		return;
+	}
 
 	const templates = await listTemplates(app, settings.templatesFolder);
 	const template = findGenericTemplate(templates);
@@ -207,17 +241,11 @@ export async function newGenericIdFromTemplate(
 	const ctx = buildContext({
 		prefix: cat.prefix,
 		id,
-		folder: { path: cat.folder.path, name: cat.folderName },
-		customTitle: title.trim(),
+		folder: { path: cat.folder.path, name: cat.folder.name },
+		customTitle: title,
 	});
-	const destPath = destPathForGenericId({ path: cat.folder.path }, cat.prefix, id, title.trim());
-	try {
-		const { file: created } = await createFromTemplate(app, template, ctx, destPath);
-		await app.workspace.getLeaf().openFile(created);
-		new Notice(`Created ${id} ${title.trim()}`);
-	} catch (e) {
-		new Notice(`Failed: ${(e as Error).message}`);
-	}
+	const destPath = destPathForGenericId({ path: cat.folder.path }, cat.prefix, id, title);
+	await createAndOpen(app, template, ctx, destPath, `${id} ${title}`);
 }
 
 export async function newStemFromTemplate(
@@ -239,12 +267,17 @@ export async function newStemFromTemplate(
 	}
 
 	new StemPickerModal(app, codes, async (code) => {
-		const name = await inputPrompt(
+		const nameRaw = await inputPrompt(
 			app,
 			`New +${code} stem`,
 			"Stem name (e.g. 'Session directives')"
 		);
-		if (!name || !name.trim()) return;
+		if (nameRaw === null) return; // cancelled
+		const name = sanitizeTitle(nameRaw);
+		if (!name) {
+			new Notice("Stem name is empty or contains invalid characters (/, \\, .., :, etc.)");
+			return;
+		}
 
 		const template = findStemTemplate(templates, code);
 		if (!template) {
@@ -255,16 +288,10 @@ export async function newStemFromTemplate(
 		const ctx = buildContext({
 			prefix: cat.prefix,
 			id: `+${code}`,
-			folder: { path: cat.folder.path, name: cat.folderName },
-			customTitle: name.trim(),
+			folder: { path: cat.folder.path, name: cat.folder.name },
+			customTitle: name,
 		});
-		const destPath = destPathForStem({ path: cat.folder.path }, cat.prefix, code, name.trim());
-		try {
-			const { file: created } = await createFromTemplate(app, template, ctx, destPath);
-			await app.workspace.getLeaf().openFile(created);
-			new Notice(`Created +${code} ${name.trim()}`);
-		} catch (e) {
-			new Notice(`Failed: ${(e as Error).message}`);
-		}
+		const destPath = destPathForStem({ path: cat.folder.path }, cat.prefix, code, name);
+		await createAndOpen(app, template, ctx, destPath, `+${code} ${name}`);
 	}).open();
 }

@@ -11,14 +11,19 @@
  *   {{time:HH:mm}}
  *
  * Templates are classified by their `jd-id` frontmatter field:
- *   "{{category}}.NN"        → standard zero, slot NN
- *   "XX.00+CODE"             → stem template, code CODE
+ *   "{{category}}.NN"        → standard zero, slot NN (NN ∈ ZeroId)
+ *   "XX.00+CODE"             → stem template, code CODE (\\w+)
  *   "{{category}}.{{id}}"    → generic ID template
  */
 
 import { type App, TFile, TFolder, moment } from "obsidian";
 import type { Moment } from "moment";
-import type { ZeroSpec } from "./standard-zeros";
+import type { ZeroId, ZeroSpec } from "./standard-zeros";
+
+// Set of valid ZeroId values, used to validate template classification.
+const ZERO_IDS: ReadonlySet<string> = new Set([
+	"00", "01", "02", "03", "04", "05", "06", "08", "09",
+]);
 
 // ── Scope ────────────────────────────────────────────────────────
 
@@ -40,7 +45,6 @@ export function scopeFor(prefix: string): string {
 // ── Placeholder context ──────────────────────────────────────────
 
 export interface PlaceholderContext {
-	category: string;
 	prefix: string;
 	id: string;
 	fullId: string;
@@ -69,7 +73,6 @@ export function buildContext(opts: BuildContextOpts): PlaceholderContext {
 	const isStem = opts.id.startsWith("+");
 	const fullId = isStem ? `${opts.prefix}.00${opts.id}` : `${opts.prefix}.${opts.id}`;
 	return {
-		category: opts.prefix,
 		prefix: opts.prefix,
 		id: opts.id,
 		fullId,
@@ -88,7 +91,9 @@ export function buildContext(opts: BuildContextOpts): PlaceholderContext {
 
 function valueFor(ctx: PlaceholderContext, key: string): string | null {
 	switch (key) {
-		case "category": return ctx.category;
+		// `category` is an alias for `prefix` — the canonical field is `prefix`,
+		// but JD-canon-style templates ask for `{{category}}`.
+		case "category":
 		case "prefix": return ctx.prefix;
 		case "id": return ctx.id;
 		case "full-id":
@@ -115,10 +120,12 @@ const FORMAT_DATE_PERCENT = /%(date|time):([^%]+)%/g;
 /**
  * Substitute placeholders in template content. Both {{var}} and %var% are
  * accepted. Formatted dates use {{date:FORMAT}} (FORMAT is a moment.js token
- * string, e.g. "YYYY-MM-DD"). Unknown placeholders are left as-is.
+ * string, e.g. "YYYY-MM-DD"). Unknown placeholders are left as-is and
+ * `console.warn`'d so users can spot typos in their templates.
  */
 export function substitute(content: string, ctx: PlaceholderContext): string {
 	let out = content;
+	const unknown = new Set<string>();
 
 	// Formatted date/time first so {{date:FORMAT}} doesn't match the plain {{date}} rule.
 	out = out.replace(FORMAT_DATE_BRACE, (_m, _kind, fmt) => moment().format(fmt));
@@ -126,12 +133,18 @@ export function substitute(content: string, ctx: PlaceholderContext): string {
 
 	out = out.replace(PLACEHOLDER_BRACE, (m, key) => {
 		const v = valueFor(ctx, key);
-		return v === null ? m : v;
+		if (v === null) { unknown.add(key); return m; }
+		return v;
 	});
 	out = out.replace(PLACEHOLDER_PERCENT, (m, key) => {
 		const v = valueFor(ctx, key);
-		return v === null ? m : v;
+		if (v === null) { unknown.add(key); return m; }
+		return v;
 	});
+
+	if (unknown.size > 0) {
+		console.warn("[jd] template substitute: unknown placeholders left as-is:", [...unknown]);
+	}
 
 	return out;
 }
@@ -139,7 +152,7 @@ export function substitute(content: string, ctx: PlaceholderContext): string {
 // ── Template discovery ───────────────────────────────────────────
 
 export type TemplateRole =
-	| { type: "zero"; zeroId: string }
+	| { type: "zero"; zeroId: ZeroId }
 	| { type: "stem"; stemCode: string }
 	| { type: "generic" };
 
@@ -149,18 +162,20 @@ export interface TemplateMatch {
 }
 
 const ZERO_ID_RE = /^\{\{category\}\}\.(\d{2})$/;
-const STEM_ID_RE = /^XX\.00\+([A-Z]+)$/;
+// Stem codes accept lowercase, digits, and hyphens (mirrors the `\w+` shape
+// used by folder-notes' JD_FOLDER_NEEDS_NOTE — and adds `-` since some
+// existing notes use it).
+const STEM_ID_RE = /^XX\.00\+([A-Za-z][\w-]*)$/;
 const GENERIC_ID_RE = /^\{\{category\}\}\.\{\{id\}\}$/;
-
-function parseJdId(content: string): string | null {
-	const m = content.match(/^jd-id:\s*"?([^"\n]+?)"?\s*$/m);
-	return m ? m[1].trim() : null;
-}
 
 function classify(jdId: string | null): TemplateRole | null {
 	if (!jdId) return null;
 	const zero = jdId.match(ZERO_ID_RE);
-	if (zero) return { type: "zero", zeroId: zero[1] };
+	if (zero) {
+		const id = zero[1];
+		if (!ZERO_IDS.has(id)) return null; // .07 / .10+ aren't valid zeros
+		return { type: "zero", zeroId: id as ZeroId };
+	}
 	const stem = jdId.match(STEM_ID_RE);
 	if (stem) return { type: "stem", stemCode: stem[1] };
 	if (GENERIC_ID_RE.test(jdId)) return { type: "generic" };
@@ -169,14 +184,30 @@ function classify(jdId: string | null): TemplateRole | null {
 
 export async function listTemplates(app: App, folderPath: string): Promise<TemplateMatch[]> {
 	const folder = app.vault.getAbstractFileByPath(folderPath);
-	if (!(folder instanceof TFolder)) return [];
+	if (!folder) {
+		throw new Error(`Templates folder not found: '${folderPath}'. Check plugin settings → Paths → Templates folder.`);
+	}
+	if (!(folder instanceof TFolder)) {
+		throw new Error(`Templates path is not a folder: '${folderPath}'`);
+	}
 
 	const out: TemplateMatch[] = [];
+	const skipped: string[] = [];
 	for (const child of folder.children) {
 		if (!(child instanceof TFile) || child.extension !== "md") continue;
-		const content = await app.vault.cachedRead(child);
-		const role = classify(parseJdId(content));
-		if (role) out.push({ file: child, role });
+		// Use metadataCache for `jd-id` lookup — it handles both single- and
+		// double-quoted strings, ignores body text matches, and gives us the
+		// live (non-cached) value that Obsidian uses everywhere else.
+		const jdId = app.metadataCache.getFileCache(child)?.frontmatter?.["jd-id"];
+		const role = classify(typeof jdId === "string" ? jdId : null);
+		if (role) {
+			out.push({ file: child, role });
+		} else if (typeof jdId === "string") {
+			skipped.push(`${child.basename} (jd-id="${jdId}")`);
+		}
+	}
+	if (skipped.length > 0) {
+		console.warn("[jd] templates: ignored files with unrecognized jd-id:", skipped);
 	}
 	return out;
 }
@@ -194,26 +225,42 @@ export function findGenericTemplate(templates: TemplateMatch[]): TemplateMatch |
 }
 
 export function listStemCodes(templates: TemplateMatch[]): string[] {
+	type StemMatch = TemplateMatch & { role: Extract<TemplateRole, { type: "stem" }> };
 	return templates
-		.filter((t): t is TemplateMatch & { role: { type: "stem"; stemCode: string } } => t.role.type === "stem")
+		.filter((t): t is StemMatch => t.role.type === "stem")
 		.map((t) => t.role.stemCode)
 		.sort();
 }
 
-// ── Creation ─────────────────────────────────────────────────────
+// ── Filename sanitization ────────────────────────────────────────
 
-export interface CreationResult {
-	file: TFile;
-	destPath: string;
+/**
+ * Reject titles that would write outside the intended folder or produce
+ * Obsidian/OS-incompatible filenames. Returns the trimmed title on success
+ * or null on rejection (caller surfaces the user-visible Notice).
+ */
+export function sanitizeTitle(raw: string): string | null {
+	const trimmed = raw.trim();
+	if (!trimmed) return null;
+	if (trimmed === "." || trimmed === "..") return null;
+	if (trimmed.includes("..")) return null;
+	// Path separators, Windows-forbidden chars, control bytes.
+	// eslint-disable-next-line no-control-regex
+	if (/[/\\:|?*<>"\x00-\x1f]/.test(trimmed)) return null;
+	return trimmed;
 }
+
+// ── Creation ─────────────────────────────────────────────────────
 
 export async function createFromTemplate(
 	app: App,
 	template: TemplateMatch,
 	ctx: PlaceholderContext,
 	destPath: string
-): Promise<CreationResult> {
-	const content = await app.vault.cachedRead(template.file);
+): Promise<TFile> {
+	// vault.read (not cachedRead) so users iterating on templates see fresh
+	// content immediately rather than hitting Obsidian's metadata-cache lag.
+	const content = await app.vault.read(template.file);
 	const substituted = substitute(content, ctx);
 
 	const parentPath = destPath.substring(0, destPath.lastIndexOf("/"));
@@ -230,8 +277,7 @@ export async function createFromTemplate(
 		throw new Error(`File already exists: ${destPath}`);
 	}
 
-	const file = await app.vault.create(destPath, substituted);
-	return { file, destPath };
+	return app.vault.create(destPath, substituted);
 }
 
 // ── Destination paths ────────────────────────────────────────────

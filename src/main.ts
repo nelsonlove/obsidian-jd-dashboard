@@ -74,10 +74,10 @@ export default class JDDashboardPlugin extends Plugin {
 
 		// Ribbon icons
 		this.addRibbonIcon("inbox", "JD Inboxes", () => {
-			this.activateInboxView();
+			runCmd("Open inbox dashboard", () => this.activateInboxView());
 		});
 		this.addRibbonIcon("alert-triangle", "JD Drift", () => {
-			this.activateDriftView();
+			runCmd("Open drift panel", () => this.activateDriftView());
 		});
 
 		// Commands
@@ -301,27 +301,33 @@ export default class JDDashboardPlugin extends Plugin {
 		if (this.settings.auditOnStartup) {
 			this.app.workspace.onLayoutReady(() => {
 				setTimeout(() => {
-					generateAuditReport(this.app, this.jdex, this.settings, {
-						staleDays: this.settings.staleDays,
-						jdConfig: this.jdConfig,
-					});
+					runCmd("Startup vault audit", () =>
+						generateAuditReport(this.app, this.jdex, this.settings, {
+							staleDays: this.settings.staleDays,
+							jdConfig: this.jdConfig,
+						})
+					);
 				}, 5000); // wait for metadata cache to settle
 			});
 		}
 
-		// Frontmatter normalizer — auto-fix on save
+		// Frontmatter normalizer — auto-fix on save. Wrap in .catch so a parse
+		// failure on one bad note doesn't silently disappear into an unhandled
+		// promise rejection (the modify event handler can't be runCmd-wrapped
+		// because it fires repeatedly, not once per command).
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
 				if (!(file instanceof TFile)) return;
 				if (!file.path.endsWith(".md")) return;
 				if (this.normalizer.isGuarded(file.path)) return;
-				this.normalizer.normalize(file);
+				this.normalizer.normalize(file).catch((e: unknown) => {
+					console.warn("[jd] normalizer failed on", file.path, e);
+				});
 			})
 		);
 	}
 
 	async onunload(): Promise<void> {
-		// Views are automatically deregistered
 		if (this.watchedJdexPath) {
 			unwatchFile(this.watchedJdexPath);
 			this.watchedJdexPath = null;

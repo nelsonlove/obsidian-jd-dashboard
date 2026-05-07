@@ -13,8 +13,8 @@ import { setSection } from "./sections";
  *   - areas like `XX-YY <name>` (no folder note convention)
  *   - categories like `XX <name>` (use XX.00 index file instead)
  * Includes:
- *   - sub-IDs:  XX.YY, XX.YY+SUF
- *   - ETE-IDs:  XXXXX, XXXXX.YY (5-digit Extend-the-End)
+ *   - sub-IDs:           XX.YY, XX.YY+SUF
+ *   - expanded-area IDs: XXXXX, XXXXX.YY (5-digit Extend-the-End format)
  */
 const JD_FOLDER_NEEDS_NOTE = /^(\d{2}\.\d{2}(?:\+\w+)?|\d{5}(?:\.\d{2})?)\s+(.+)$/;
 

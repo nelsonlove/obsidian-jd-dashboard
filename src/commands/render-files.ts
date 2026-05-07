@@ -17,13 +17,15 @@
 import { type App, Notice, TFile, moment } from "obsidian";
 import { readdirSync, lstatSync, readlinkSync } from "fs";
 import { sep } from "path";
-import type { JDSettings } from "../settings";
+import { type JDSettings, type LlmTaskId } from "../settings";
 import { getProvider, type ProviderId } from "../llm/provider";
 import { getApiKey } from "../llm/secrets";
 import { getKeys } from "../keys";
 import { setSection } from "../lib/sections";
 
-const TASK_ID = "renderFiles";
+// Typed as LlmTaskId so a future rename in LLM_TASKS without renaming here
+// fails the build instead of producing a runtime undefined lookup.
+const TASK_ID: LlmTaskId = "renderFiles";
 const SECTION_HEADING = "## Contents (Filesystem)";
 
 /** Filenames to skip in the listing. */
@@ -43,10 +45,14 @@ interface ListResult {
 	skipped: { name: string; reason: string }[];
 }
 
-interface PathResolution {
-	path?: string;
-	error?: string;
-}
+/**
+ * Discriminated union over the path-resolution result so consumers can
+ * narrow via `if (resolved.ok) { use resolved.path }` rather than checking
+ * which-of-two-optionals-is-set.
+ */
+type PathResolution =
+	| { ok: true; path: string }
+	| { ok: false; error: string };
 
 export async function renderFiles(
 	app: App,
@@ -73,8 +79,8 @@ export async function renderFiles(
 	}
 
 	const resolved = resolveFilesystemPath(settings, file);
-	if (!resolved.path) {
-		new Notice(`Render Files: ${resolved.error ?? `couldn't resolve filesystem path for ${id}`}`);
+	if (!resolved.ok) {
+		new Notice(`Render Files: ${resolved.error}`);
 		return;
 	}
 	const fsPath = resolved.path;
@@ -160,7 +166,7 @@ function resolveFilesystemPath(settings: JDSettings, file: TFile): PathResolutio
 	let root = settings.jdRoot.replace("~", home);
 	while (root.length > 1 && root.endsWith(sep)) root = root.slice(0, -1);
 	if (!root.startsWith(sep)) {
-		return { error: `JD root '${settings.jdRoot}' is not absolute. Set it under plugin settings → Paths.` };
+		return { ok: false, error: `JD root '${settings.jdRoot}' is not absolute. Set it under plugin settings → Paths.` };
 	}
 
 	const parentName = file.parent?.name ?? "";
@@ -168,20 +174,20 @@ function resolveFilesystemPath(settings: JDSettings, file: TFile): PathResolutio
 	const vaultRelDir = isCover
 		? file.parent?.path ?? ""
 		: dirSiblingForLeaf(file);
-	if (!vaultRelDir) return { error: "active note has no resolvable vault path" };
+	if (!vaultRelDir) return { ok: false, error: "active note has no resolvable vault path" };
 
 	const segments = vaultRelDir.split("/");
 	if (segments.some((s) => s === "..")) {
-		return { error: "vault path contains '..' segment — refusing to traverse outside JD root" };
+		return { ok: false, error: "vault path contains '..' segment — refusing to traverse outside JD root" };
 	}
 	if (segments.some((s) => s === "")) {
-		return { error: "vault path has empty segment" };
+		return { ok: false, error: "vault path has empty segment" };
 	}
 	if (vaultRelDir.startsWith("/")) {
-		return { error: "vault path is absolute — refusing" };
+		return { ok: false, error: "vault path is absolute — refusing" };
 	}
 	const relNative = segments.join(sep);
-	return { path: `${root}${sep}${relNative}` };
+	return { ok: true, path: `${root}${sep}${relNative}` };
 }
 
 function dirSiblingForLeaf(file: TFile): string {

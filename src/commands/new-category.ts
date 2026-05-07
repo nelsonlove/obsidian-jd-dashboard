@@ -70,8 +70,9 @@ export async function newCategoryCommand(app: App, file: TFile): Promise<void> {
 		now
 	);
 	if (result.failures.length > 0) {
+		const total = result.created + result.skipped + result.failures.length;
 		new Notice(
-			`Created ${folderName} but ${result.failures.length}/${result.failures.length + result.created} zeros failed — see console`
+			`Created ${folderName}: ${result.created} new, ${result.skipped} existed, ${result.failures.length}/${total} failed — see console`
 		);
 		console.warn("[jd] new-category partial:", result.failures);
 		return;
