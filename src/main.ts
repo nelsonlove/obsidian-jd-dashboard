@@ -16,6 +16,12 @@ import { generateAuditReport } from "./commands/audit-report";
 import { migrateReadmeFiles } from "./commands/migrate-readme";
 import { renderCategoryJdex } from "./commands/render-jdex";
 import { promoteToFolder } from "./commands/promote-to-folder";
+import { renderFiles } from "./commands/render-files";
+import { renumberCommand } from "./commands/renumber";
+import { indexFolderNote } from "./commands/index-folder-note";
+import { standardZerosCommand } from "./commands/standard-zeros";
+import { newCategoryCommand } from "./commands/new-category";
+import { indexVault, indexCategory } from "./commands/index-vault";
 import { scanDrift } from "./scanner";
 import { parseJDex, parseJDConfig, type JDex, type JDConfig } from "./jdex";
 import { FrontmatterNormalizer } from "./normalizer";
@@ -129,6 +135,88 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
 				promoteToFolder(this.app, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "render-files",
+			name: "Render filesystem contents",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!file.path.endsWith(".md")) return false;
+				if (checking) return true;
+				renderFiles(this.app, this.settings, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "renumber",
+			name: "Renumber active note",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!file.path.endsWith(".md")) return false;
+				if (checking) return true;
+				renumberCommand(this.app, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "index-folder-note",
+			name: "Index folder note",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!file.path.endsWith(".md")) return false;
+				if (checking) return true;
+				indexFolderNote(this.app, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "index-category",
+			name: "Index category (active .00 note)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (!/^\d{2}\.00\b/.test(file.basename)) return false;
+				if (checking) return true;
+				indexCategory(this.app, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "index-vault",
+			name: "Index entire vault",
+			callback: () => indexVault(this.app),
+		});
+
+		this.addCommand({
+			id: "standard-zeros",
+			name: "Create standard zeros in current category",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (checking) return true;
+				standardZerosCommand(this.app, file);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "new-category",
+			name: "New category in current area",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) return false;
+				if (checking) return true;
+				newCategoryCommand(this.app, file);
 				return true;
 			},
 		});
