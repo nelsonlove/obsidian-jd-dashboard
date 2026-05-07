@@ -199,6 +199,7 @@ surveyed: 2026-03-31
 | `tasks` | `.02` | Task & project management |
 | `templates` | `.03` | Templates |
 | `links` | `.04` | Link collections |
+| `policies` | `.05` | Conventions & policies |
 | `knowledge-base` | `.06` | Knowledge base |
 | `someday` | `.08` | Someday/maybe |
 | `archive` | `.09` | Archive |
