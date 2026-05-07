@@ -227,7 +227,7 @@ export async function newGenericIdFromTemplate(
 	if (titleRaw === null) return; // cancelled
 	const title = sanitizeTitle(titleRaw);
 	if (!title) {
-		new Notice("Title is empty or contains invalid characters (/, \\, .., :, etc.)");
+		new Notice("Title is empty, leading-dot, or contains invalid characters (/, \\, .., :, etc.)");
 		return;
 	}
 
@@ -275,7 +275,7 @@ export async function newStemFromTemplate(
 		if (nameRaw === null) return; // cancelled
 		const name = sanitizeTitle(nameRaw);
 		if (!name) {
-			new Notice("Stem name is empty or contains invalid characters (/, \\, .., :, etc.)");
+			new Notice("Stem name is empty, leading-dot, or contains invalid characters (/, \\, .., :, etc.)");
 			return;
 		}
 

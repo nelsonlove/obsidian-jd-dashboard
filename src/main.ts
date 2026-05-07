@@ -84,7 +84,7 @@ export default class JDDashboardPlugin extends Plugin {
 		this.addCommand({
 			id: "open-inbox-dashboard",
 			name: "Open inbox dashboard",
-			callback: () => this.activateInboxView(),
+			callback: () => runCmd("Open inbox dashboard", () => this.activateInboxView()),
 		});
 
 		this.addCommand({
@@ -96,7 +96,7 @@ export default class JDDashboardPlugin extends Plugin {
 		this.addCommand({
 			id: "open-drift-panel",
 			name: "Open drift panel",
-			callback: () => this.activateDriftView(),
+			callback: () => runCmd("Open drift panel", () => this.activateDriftView()),
 		});
 
 		this.addCommand({

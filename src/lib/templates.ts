@@ -21,9 +21,16 @@ import type { Moment } from "moment";
 import type { ZeroId, ZeroSpec } from "./standard-zeros";
 
 // Set of valid ZeroId values, used to validate template classification.
-const ZERO_IDS: ReadonlySet<string> = new Set([
+// Typed as `ReadonlySet<ZeroId>` so the literal members are cross-checked
+// against the union at construction — a typo like "07" would fail to compile.
+const ZERO_IDS: ReadonlySet<ZeroId> = new Set<ZeroId>([
 	"00", "01", "02", "03", "04", "05", "06", "08", "09",
 ]);
+
+/** Type guard: is this string a valid `ZeroId`? */
+function isZeroId(s: string): s is ZeroId {
+	return (ZERO_IDS as ReadonlySet<string>).has(s);
+}
 
 // ── Scope ────────────────────────────────────────────────────────
 
@@ -162,9 +169,9 @@ export interface TemplateMatch {
 }
 
 const ZERO_ID_RE = /^\{\{category\}\}\.(\d{2})$/;
-// Stem codes accept lowercase, digits, and hyphens (mirrors the `\w+` shape
-// used by folder-notes' JD_FOLDER_NEEDS_NOTE — and adds `-` since some
-// existing notes use it).
+// Stem codes: leading letter, then word chars or hyphens. Broader than
+// folder-notes' `\w+` to accommodate hyphenated codes that exist in some
+// user notes; the leading-letter requirement avoids `+1`-style anomalies.
 const STEM_ID_RE = /^XX\.00\+([A-Za-z][\w-]*)$/;
 const GENERIC_ID_RE = /^\{\{category\}\}\.\{\{id\}\}$/;
 
@@ -173,8 +180,8 @@ function classify(jdId: string | null): TemplateRole | null {
 	const zero = jdId.match(ZERO_ID_RE);
 	if (zero) {
 		const id = zero[1];
-		if (!ZERO_IDS.has(id)) return null; // .07 / .10+ aren't valid zeros
-		return { type: "zero", zeroId: id as ZeroId };
+		if (!isZeroId(id)) return null; // .07 / .10+ aren't valid zeros
+		return { type: "zero", zeroId: id };
 	}
 	const stem = jdId.match(STEM_ID_RE);
 	if (stem) return { type: "stem", stemCode: stem[1] };
@@ -195,14 +202,28 @@ export async function listTemplates(app: App, folderPath: string): Promise<Templ
 	const skipped: string[] = [];
 	for (const child of folder.children) {
 		if (!(child instanceof TFile) || child.extension !== "md") continue;
-		// Use metadataCache for `jd-id` lookup — it handles both single- and
-		// double-quoted strings, ignores body text matches, and gives us the
-		// live (non-cached) value that Obsidian uses everywhere else.
-		const jdId = app.metadataCache.getFileCache(child)?.frontmatter?.["jd-id"];
-		const role = classify(typeof jdId === "string" ? jdId : null);
+		// Prefer the parsed frontmatter from metadataCache — it handles both
+		// single- and double-quoted strings, multi-line values, and won't
+		// match a literal `jd-id:` line in the body. But the cache may not
+		// have indexed a brand-new template yet, so fall back to a content
+		// read + simple regex parse so unindexed files don't silently drop.
+		const cache = app.metadataCache.getFileCache(child);
+		let jdId: string | null = null;
+		if (cache) {
+			const v = cache.frontmatter?.["jd-id"];
+			if (typeof v === "string") jdId = v;
+		} else {
+			try {
+				jdId = parseJdIdFromContent(await app.vault.cachedRead(child));
+			} catch {
+				skipped.push(`${child.basename} (read failed)`);
+				continue;
+			}
+		}
+		const role = classify(jdId);
 		if (role) {
 			out.push({ file: child, role });
-		} else if (typeof jdId === "string") {
+		} else if (jdId !== null) {
 			skipped.push(`${child.basename} (jd-id="${jdId}")`);
 		}
 	}
@@ -212,7 +233,17 @@ export async function listTemplates(app: App, folderPath: string): Promise<Templ
 	return out;
 }
 
-export function findZeroTemplate(templates: TemplateMatch[], zeroId: string): TemplateMatch | null {
+/**
+ * Last-resort frontmatter `jd-id` extraction for files that haven't been
+ * indexed by the metadataCache yet. Strips both single- and double-quote
+ * wrapping. Does not handle multi-line values; templates don't use them.
+ */
+function parseJdIdFromContent(content: string): string | null {
+	const m = content.match(/^jd-id:\s*['"]?([^'"\n]+?)['"]?\s*$/m);
+	return m ? m[1].trim() : null;
+}
+
+export function findZeroTemplate(templates: TemplateMatch[], zeroId: ZeroId): TemplateMatch | null {
 	return templates.find((t) => t.role.type === "zero" && t.role.zeroId === zeroId) ?? null;
 }
 
@@ -238,13 +269,25 @@ export function listStemCodes(templates: TemplateMatch[]): string[] {
  * Reject titles that would write outside the intended folder or produce
  * Obsidian/OS-incompatible filenames. Returns the trimmed title on success
  * or null on rejection (caller surfaces the user-visible Notice).
+ *
+ * Rejection rules:
+ *   - empty / whitespace-only
+ *   - any leading dot (would create a hidden file Obsidian doesn't index)
+ *   - any `..` substring (path-traversal risk)
+ *   - path separators (`/`, `\`)
+ *   - Windows-forbidden characters: `:` `|` `?` `*` `<` `>` `"`
+ *   - control bytes (U+0000–U+001F)
+ *
+ * NOT rejected (intentional):
+ *   - non-leading dots in longer names (e.g. "foo.v2", "a.b.c")
+ *   - trailing whitespace or dots (Windows would silently truncate; macOS
+ *     and Linux accept them. Add a check here if/when you target Windows.)
  */
 export function sanitizeTitle(raw: string): string | null {
 	const trimmed = raw.trim();
 	if (!trimmed) return null;
-	if (trimmed === "." || trimmed === "..") return null;
+	if (trimmed.startsWith(".")) return null;
 	if (trimmed.includes("..")) return null;
-	// Path separators, Windows-forbidden chars, control bytes.
 	// eslint-disable-next-line no-control-regex
 	if (/[/\\:|?*<>"\x00-\x1f]/.test(trimmed)) return null;
 	return trimmed;
@@ -258,8 +301,10 @@ export async function createFromTemplate(
 	ctx: PlaceholderContext,
 	destPath: string
 ): Promise<TFile> {
-	// vault.read (not cachedRead) so users iterating on templates see fresh
-	// content immediately rather than hitting Obsidian's metadata-cache lag.
+	// vault.read (not cachedRead) so a user iterating on a template sees their
+	// latest edits when creating from it. cachedRead is a separate per-file
+	// content cache (distinct from metadataCache); it can lag behind disk
+	// after a recent vault.modify.
 	const content = await app.vault.read(template.file);
 	const substituted = substitute(content, ctx);
 
