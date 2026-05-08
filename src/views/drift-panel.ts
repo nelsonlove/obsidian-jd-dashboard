@@ -11,6 +11,7 @@ import type JDDashboardPlugin from "../main";
 import { scanDrift, findMissingStubs, type DriftItem, type MissingStub } from "../scanner";
 import { getKeys, formatTypeFrontmatter } from "../keys";
 import { inferType } from "../normalizer";
+import { standardZeros } from "../lib/standard-zeros";
 
 export const VIEW_TYPE_DRIFT = "jd-drift-panel";
 
@@ -329,8 +330,16 @@ export class DriftPanelView extends ItemView {
 
 	// ── Stub creation ────────────────────────────────────────────
 
-	/** Standard zeros that are directories (get folder + README) vs notes */
-	private static DIR_ZEROS = new Set(["01", "03", "06", "09"]);
+	/**
+	 * Standard zeros that are directories (get folder + README) vs notes.
+	 * Derived from `standardZeros()` so this stays in sync as the canonical
+	 * zero set evolves (e.g. when `.07` was claimed for the Claude Code
+	 * notebook, this set picked it up automatically). Prefix/suffix don't
+	 * affect `id` or `hasDir`, so any seed values work.
+	 */
+	private static DIR_ZEROS: Set<string> = new Set(
+		standardZeros("00", "").filter((z) => z.hasDir).map((z) => z.id)
+	);
 
 	private isDirectoryZero(id: string): boolean {
 		const parts = id.split(".");
@@ -346,9 +355,9 @@ export class DriftPanelView extends ItemView {
 		const settings = this.plugin.settings;
 		const keys = getKeys(settings);
 
-		// Standard zeros (01/03/06/09) get a meaningful inferred type
-		// (inbox/templates/knowledge-base/archive). Other IDs fall through
-		// to the generic "id", which may be omitted by settings.
+		// Standard zeros get a meaningful inferred type via `inferType` /
+		// `ZERO_TYPES` (e.g. `.01` → "inbox", `.07` → "agent"). Other IDs
+		// fall through to the generic "id", which may be omitted by settings.
 		const inferred =
 			inferType(id, {
 				inferForExpanded: settings.inferTypeForExpandedIds,

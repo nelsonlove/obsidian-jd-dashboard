@@ -22,9 +22,9 @@ import type { ZeroId, ZeroSpec } from "./standard-zeros";
 
 // Set of valid ZeroId values, used to validate template classification.
 // Typed as `ReadonlySet<ZeroId>` so the literal members are cross-checked
-// against the union at construction — a typo like "07" would fail to compile.
+// against the union at construction — a typo like "10" would fail to compile.
 const ZERO_IDS: ReadonlySet<ZeroId> = new Set<ZeroId>([
-	"00", "01", "02", "03", "04", "05", "06", "08", "09",
+	"00", "01", "02", "03", "04", "05", "06", "07", "08", "09",
 ]);
 
 /** Type guard: is this string a valid `ZeroId`? */
@@ -180,7 +180,7 @@ function classify(jdId: string | null): TemplateRole | null {
 	const zero = jdId.match(ZERO_ID_RE);
 	if (zero) {
 		const id = zero[1];
-		if (!isZeroId(id)) return null; // .07 / .10+ aren't valid zeros
+		if (!isZeroId(id)) return null; // .10+ aren't valid zeros (.07 is now a zero — see standard-zeros.ts)
 		return { type: "zero", zeroId: id };
 	}
 	const stem = jdId.match(STEM_ID_RE);
