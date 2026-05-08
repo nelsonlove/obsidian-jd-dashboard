@@ -48,6 +48,7 @@ const ZERO_TYPES: Record<string, string> = {
 	"04": "links",
 	"05": "policies",
 	"06": "knowledge-base",
+	"07": "claude-code-notebook",
 	"08": "someday",
 	"09": "archive",
 };
