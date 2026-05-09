@@ -2,9 +2,9 @@
  * Standard-zeros (`XX.00`–`XX.09`) generation for JD categories.
  *
  * The full set is fixed: `00, 01, 02, 03, 04, 05, 06, 07, 08, 09`. `.07`
- * is the local-extension `Claude Code notebook for [scope]` slot — see
- * vault `00.05` for the convention. The literal type `ZeroId` documents
- * and enforces this.
+ * is the local-extension `Dashboard for [scope]` slot (single note per
+ * category, jd/dashboard tag) — see vault `00.05` for the convention.
+ * The literal type `ZeroId` documents and enforces this.
  */
 
 import type { App, TFolder } from "obsidian";
@@ -32,7 +32,7 @@ export function standardZeros(prefix: string, suffix: string): ZeroSpec[] {
 		{ id: "04", name: `Links ${suffix}`, tag: "jd/links", hasDir: false },
 		{ id: "05", name: `Conventions & policies ${suffix}`, tag: "jd/policies", hasDir: false },
 		{ id: "06", name: `Knowledge base ${suffix}`, tag: "jd/knowledge-base", hasDir: true },
-		{ id: "07", name: `Claude Code notebook ${suffix}`, tag: "jd/agent", hasDir: true },
+		{ id: "07", name: `Dashboard ${suffix}`, tag: "jd/dashboard", hasDir: false },
 		{ id: "08", name: `Someday ${suffix}`, tag: "jd/someday", hasDir: false },
 		{ id: "09", name: `Archive ${suffix}`, tag: "jd/archive", hasDir: true },
 	];
