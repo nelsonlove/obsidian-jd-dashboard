@@ -15,6 +15,8 @@ export interface JDEntry {
 	created?: string;
 	description?: string;
 	status?: string;
+	/** Friendly external-location names from `~/.config/jd/jd.yaml#external_locations`. */
+	locations?: string[];
 }
 
 export interface JDCategory {
