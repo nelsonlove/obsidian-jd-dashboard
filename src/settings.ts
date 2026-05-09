@@ -40,6 +40,15 @@ export interface JDSettings {
 	/** Run vault audit on Obsidian startup */
 	auditOnStartup: boolean;
 
+	// ── JDex write-back ──────────────────────────────────────────
+	/**
+	 * When true, rebuild `jd-index.yaml` from the vault automatically on
+	 * frontmatter changes and structural events (create/delete/rename).
+	 * Implements the Obsidian-centric "vault is source, YAML is cache"
+	 * model. Default off; flip on once trusted.
+	 */
+	autoUpdateJdexYaml: boolean;
+
 	// ── Frontmatter keys (configurable) ──────────────────────────
 	titleKey: string;
 	idKey: string;
@@ -121,6 +130,7 @@ export const DEFAULT_SETTINGS: JDSettings = {
 	showEmptyInboxes: false,
 	staleDays: 90,
 	auditOnStartup: false,
+	autoUpdateJdexYaml: false,
 
 	titleKey: "jd-title",
 	idKey: "jd-id",
@@ -280,6 +290,22 @@ export class JDSettingsTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.auditOnStartup)
 					.onChange(async (value) => {
 						this.plugin.settings.auditOnStartup = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-update jd-index.yaml")
+			.setDesc(
+				"When on, rebuild jd-index.yaml from the vault on frontmatter " +
+				"changes and structural events (create/delete/rename). " +
+				"Implements the vault-as-source-of-truth model. Default off."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoUpdateJdexYaml)
+					.onChange(async (value) => {
+						this.plugin.settings.autoUpdateJdexYaml = value;
 						await this.plugin.saveSettings();
 					})
 			);

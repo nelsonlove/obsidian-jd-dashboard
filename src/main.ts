@@ -31,7 +31,8 @@ import { scanDrift } from "./scanner";
 import { parseJDex, parseJDConfig, type JDex, type JDConfig } from "./jdex";
 import { FrontmatterNormalizer } from "./normalizer";
 import { getKeys } from "./keys";
-import { readFileSync, watchFile, unwatchFile } from "fs";
+import { readFileSync, writeFileSync, watchFile, unwatchFile } from "fs";
+import { buildJdexFromVault, serializeJdex } from "./lib/jdex-from-vault";
 
 /**
  * Wrap a command body so any uncaught rejection surfaces a Notice and a
@@ -55,6 +56,9 @@ export default class JDDashboardPlugin extends Plugin {
 	private watchedJdexPath: string | null = null;
 	private watchedConfigPath: string | null = null;
 	private reloadDebouncer: ReturnType<typeof setTimeout> | null = null;
+	private jdexRebuildDebouncer: ReturnType<typeof setTimeout> | null = null;
+	/** ms-since-epoch of the last self-write to jd-index.yaml (skip-self guard). */
+	private lastJdexSelfWriteMs = 0;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -325,6 +329,21 @@ export default class JDDashboardPlugin extends Plugin {
 				});
 			})
 		);
+
+		// JDex write-back: rebuild jd-index.yaml when vault truth changes.
+		// `metadataCache.on("changed")` fires after frontmatter parse — the
+		// right hook for description/locations edits. `vault.on(...)` covers
+		// structural changes. Each is debounced via `scheduleJdexRebuild`,
+		// which itself is a no-op when the autoUpdateJdexYaml setting is off.
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				if (file.extension !== "md") return;
+				this.scheduleJdexRebuild();
+			})
+		);
+		this.registerEvent(this.app.vault.on("create", () => this.scheduleJdexRebuild()));
+		this.registerEvent(this.app.vault.on("delete", () => this.scheduleJdexRebuild()));
+		this.registerEvent(this.app.vault.on("rename", () => this.scheduleJdexRebuild()));
 	}
 
 	async onunload(): Promise<void> {
@@ -339,6 +358,10 @@ export default class JDDashboardPlugin extends Plugin {
 		if (this.reloadDebouncer) {
 			clearTimeout(this.reloadDebouncer);
 			this.reloadDebouncer = null;
+		}
+		if (this.jdexRebuildDebouncer) {
+			clearTimeout(this.jdexRebuildDebouncer);
+			this.jdexRebuildDebouncer = null;
 		}
 	}
 
@@ -391,7 +414,17 @@ export default class JDDashboardPlugin extends Plugin {
 		if (current === path) return;
 		if (current) unwatchFile(current);
 		watchFile(path, { interval: 1000 }, (curr, prev) => {
-			if (curr.mtimeMs !== prev.mtimeMs) this.scheduleReload();
+			if (curr.mtimeMs === prev.mtimeMs) return;
+			// Skip-self guard: if we wrote this file in the last second
+			// (only relevant for jdex), don't trigger a reload — the
+			// in-memory state is already current.
+			if (
+				kind === "jdex" &&
+				Date.now() - this.lastJdexSelfWriteMs < 1000
+			) {
+				return;
+			}
+			this.scheduleReload();
 		});
 		if (kind === "jdex") this.watchedJdexPath = path;
 		else this.watchedConfigPath = path;
@@ -403,6 +436,41 @@ export default class JDDashboardPlugin extends Plugin {
 			this.reloadDebouncer = null;
 			this.reloadJDexAndConfig("file changed");
 		}, 250);
+	}
+
+	/**
+	 * Debounced rebuild of `jd-index.yaml` from current vault state.
+	 *
+	 * Triggered by vault structure or frontmatter events when
+	 * `settings.autoUpdateJdexYaml` is on. Coalesces bursts (e.g. a
+	 * batch rename) into a single write. Records the write time so the
+	 * `watchFile` callback skips its own self-triggered reload.
+	 */
+	scheduleJdexRebuild(): void {
+		if (!this.settings.autoUpdateJdexYaml) return;
+		if (this.jdexRebuildDebouncer) clearTimeout(this.jdexRebuildDebouncer);
+		this.jdexRebuildDebouncer = setTimeout(() => {
+			this.jdexRebuildDebouncer = null;
+			this.rebuildJdexNow();
+		}, 500);
+	}
+
+	private rebuildJdexNow(): void {
+		try {
+			const jdex = buildJdexFromVault(this.app);
+			const yaml = serializeJdex(jdex);
+			const path = this.resolvePath(this.settings.jdexPath);
+			this.lastJdexSelfWriteMs = Date.now();
+			writeFileSync(path, yaml, "utf-8");
+			// Update in-memory copy so consumers see the new state without
+			// waiting for the watchFile reload (which we just suppressed).
+			this.jdex = jdex;
+		} catch (e) {
+			console.warn("[jd] rebuildJdexNow failed", e);
+			new Notice(
+				"JD: failed to write jd-index.yaml — see console"
+			);
+		}
 	}
 
 	reloadJDexAndConfig(reason: string): void {
