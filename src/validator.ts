@@ -165,7 +165,23 @@ function checkDuplicateIds(app: App, keys: JDKeys): ValidationIssue[] {
 	return issues;
 }
 
-function checkOrphanedFiles(app: App, keys: JDKeys): ValidationIssue[] {
+/**
+ * True when frontmatter marks the file as type `index`. Honors both
+ * key-mode (`jd-type: index`) and tag-mode (`tags: [jd/index]`) — the
+ * latter is the active configuration for users with `typeAsTag: true`.
+ */
+function isIndexFile(fm: unknown, keys: JDKeys, indexTag?: string): boolean {
+	if (!fm || typeof fm !== "object") return false;
+	const f = fm as Record<string, unknown>;
+	if (f[keys.type] === "index") return true;
+	if (!indexTag) return false;
+	const raw = f.tags;
+	if (raw == null) return false;
+	const tags = Array.isArray(raw) ? raw : [raw];
+	return tags.some((t) => String(t).replace(/^#/, "") === indexTag);
+}
+
+function checkOrphanedFiles(app: App, keys: JDKeys, indexTag?: string): ValidationIssue[] {
 	const issues: ValidationIssue[] = [];
 
 	const linkedPaths = new Set<string>();
@@ -197,7 +213,7 @@ function checkOrphanedFiles(app: App, keys: JDKeys): ValidationIssue[] {
 
 		const cache = app.metadataCache.getFileCache(file);
 		const fm = cache?.frontmatter;
-		if (fm?.[keys.type] === "index") continue;
+		if (isIndexFile(fm, keys, indexTag)) continue;
 
 		if (!linkedPaths.has(file.path)) {
 			issues.push({
@@ -446,6 +462,12 @@ export interface ValidatorOptions {
 	skipChecks?: string[];
 	keys: JDKeys;
 	jdConfig?: JDConfig | null;
+	/**
+	 * Tag form of `jd-type: index` for users with `typeAsTag` settings on
+	 * (e.g. `jd/index`). When set, the orphan check exempts files carrying
+	 * this tag in addition to those with `jd-type: index` frontmatter.
+	 */
+	indexTag?: string;
 }
 
 export function runValidation(
@@ -453,7 +475,7 @@ export function runValidation(
 	jdex: JDex | null,
 	options: ValidatorOptions
 ): ValidationReport {
-	const { staleDays = 90, skipChecks = [], keys, jdConfig = null } = options;
+	const { staleDays = 90, skipChecks = [], keys, jdConfig = null, indexTag } = options;
 	const skip = new Set(skipChecks);
 
 	clearIgnoreCache();
@@ -464,7 +486,7 @@ export function runValidation(
 		["date-format", () => checkDateFormats(app)],
 		["valid-category", () => checkValidCategories(app, keys)],
 		["duplicate-id", () => checkDuplicateIds(app, keys)],
-		["orphaned-file", () => checkOrphanedFiles(app, keys)],
+		["orphaned-file", () => checkOrphanedFiles(app, keys, indexTag)],
 		["broken-wikilink", () => checkBrokenWikilinks(app)],
 		["empty-note", () => checkEmptyNotes(app)],
 		["stale-surveyed", () => checkStaleSurveyed(app, staleDays)],
