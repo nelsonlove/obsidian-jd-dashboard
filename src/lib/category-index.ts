@@ -285,7 +285,12 @@ async function reindexOrdinary(
  * fresh from the vault — its own `## Contents` (if any) is what we're
  * about to overwrite. For sibling categories we copy their `## Contents`
  * verbatim (which already carries their tier-1 preserved descriptions),
- * falling back to a fresh build if the source has none yet.
+ * falling back to a fresh build if the source has none yet, and prepend
+ * the sibling's own `XX.00` link so that index file isn't an orphan.
+ *
+ * (Without the prepend, no upper tier ever links to per-category XX.00
+ * files — `getCategoryFiles` excludes self from each cat's listing — so
+ * the orphan check flags every JDex.)
  */
 async function bulletsForCategory(
 	app: App,
@@ -294,7 +299,9 @@ async function bulletsForCategory(
 ): Promise<string> {
 	if (cat.indexFile.path === selfIndexPath) return buildLinks(cat.files);
 	const content = await app.vault.read(cat.indexFile);
-	return extractContentsBullets(content) || buildLinks(cat.files);
+	const inner = extractContentsBullets(content) || buildLinks(cat.files);
+	const indexBullet = `- [[${cat.indexFile.basename}]]`;
+	return inner ? `${indexBullet}\n${inner}` : indexBullet;
 }
 
 /**

@@ -15,7 +15,7 @@ import {
 } from "../validator";
 import type { JDex } from "../jdex";
 import type { JDSettings } from "../settings";
-import { getKeys, formatTypeFrontmatter } from "../keys";
+import { getKeys, formatTypeFrontmatter, typeTagFor } from "../keys";
 
 const REPORT_PATH =
 	"00-09 System/00 System management/00.00+REPORT JD vault audit.md";
@@ -88,7 +88,8 @@ export async function generateAuditReport(
 	options?: Omit<ValidatorOptions, "keys">
 ): Promise<void> {
 	const keys = getKeys(settings);
-	const report = runValidation(app, jdex, { ...options, keys });
+	const indexTag = settings.typeAsTag ? typeTagFor(settings, "index") : undefined;
+	const report = runValidation(app, jdex, { ...options, keys, indexTag });
 	const lines: string[] = [];
 	const CHECK_LABELS = checkLabels(keys.id);
 
