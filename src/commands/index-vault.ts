@@ -1,8 +1,8 @@
 /**
  * Vault-wide reindex: ensure folder notes for JD-named folders, rewrite all
- * category JDex (`XX.00`) files including the system index, refresh
- * `## Contents (Obsidian)` in every folder note, and sync `jd-id`
- * frontmatter across all JD-named files.
+ * category JDex (`XX.00`) files at all three tiers (per-category, area
+ * management, system), refresh `## Contents (Obsidian)` in every folder
+ * note, and sync `jd-id` frontmatter across all JD-named files.
  *
  * Per-iteration error isolation: one bad file (corrupt YAML, locked write,
  * etc.) doesn't kill the whole sweep. Failures are accumulated and surfaced
@@ -14,23 +14,25 @@ import { ensureFolderNotes, updateFolderNote } from "../lib/folder-notes";
 import { ensureCategoryIndexes } from "../lib/standard-zeros";
 import { syncJdIds } from "../lib/sync-id";
 import {
-	buildFrontmatter,
-	buildLinks,
-	getCategoryFiles,
-	getCreatedDate,
+	type PreservedDescription,
+	isAreaManagement,
 	reindexCategory,
 } from "../lib/category-index";
-
-interface CategoryData {
-	indexFile: TFile;
-	folder: NonNullable<TFile["parent"]>;
-	areaFolder: NonNullable<TFile["parent"]>["parent"];
-	files: TFile[];
-}
 
 interface Failures {
 	indexes: { path: string; error: string }[];
 	folderNotes: { path: string; error: string }[];
+}
+
+/**
+ * Order: ordinary → area-management → system. Upper tiers consume each
+ * tier's freshly-rebuilt `## Contents`, so per-area and per-system runs
+ * after their inputs are settled.
+ */
+function tierOrder(prefix: string): number {
+	if (prefix === "00") return 2;
+	if (isAreaManagement(prefix)) return 1;
+	return 0;
 }
 
 export async function indexVault(app: App): Promise<void> {
@@ -38,7 +40,6 @@ export async function indexVault(app: App): Promise<void> {
 	// YAML parsers (notably obsidian-linter's "Dedupe YAML Array Values"
 	// rule, which mis-treats `2026-05-07 14:39` as a multi-line construct).
 	const now = moment().format("YYYY-MM-DDTHH:mm");
-	const modifiedNow = now;
 
 	const failures: Failures = { indexes: [], folderNotes: [] };
 
@@ -52,70 +53,23 @@ export async function indexVault(app: App): Promise<void> {
 	// Refresh file list after potential creations.
 	const allFiles = app.vault.getFiles().filter((f) => f.extension === "md");
 
-	// 1. Rewrite all XX.00 category index files. Regex requires a real
-	//    separator after XX.00 to avoid matching `XX.00+SUF.md`.
-	const indexFiles = allFiles.filter((f) => /^\d{2}\.00(?:\s|\.|$)/.test(f.basename));
+	// 1. Reindex every XX.00 in tier order. The regex requires a real
+	//    separator after `XX.00` to avoid matching `XX.00+SUF.md` siblings.
+	const indexFiles = allFiles
+		.filter((f) => /^\d{2}\.00(?:\s|\.|$)/.test(f.basename))
+		.map((f) => ({ file: f, prefix: f.basename.match(/^(\d{2})/)![1] }))
+		.sort((a, b) => tierOrder(a.prefix) - tierOrder(b.prefix) || a.prefix.localeCompare(b.prefix));
+
 	let rewriteCount = 0;
-
-	const categories = new Map<string, CategoryData>();
-	for (const indexFile of indexFiles) {
-		const m = indexFile.basename.match(/^(\d{2})/);
-		if (!m || !indexFile.parent) continue;
-		categories.set(m[1], {
-			indexFile,
-			folder: indexFile.parent,
-			areaFolder: indexFile.parent.parent,
-			files: getCategoryFiles(allFiles, m[1], indexFile.parent.path, indexFile.path),
-		});
-	}
-
-	for (const [prefix, cat] of categories) {
-		if (prefix === "00") continue;
+	const allPreserved: PreservedDescription[] = [];
+	for (const { file: indexFile } of indexFiles) {
 		try {
-			await reindexCategory(app, cat.indexFile, allFiles, now, modifiedNow);
+			const result = await reindexCategory(app, indexFile, allFiles);
+			allPreserved.push(...result.preserved);
 			rewriteCount++;
 		} catch (e) {
-			failures.indexes.push({ path: cat.indexFile.path, error: (e as Error).message });
-			console.warn("[jd] reindexCategory failed", cat.indexFile.path, e);
-		}
-	}
-
-	// Rewrite system index (00.00) — group by area.
-	const systemCat = categories.get("00");
-	if (systemCat) {
-		try {
-			const createdDate = await getCreatedDate(app, systemCat.indexFile, now);
-			const title = "JDex for the system";
-
-			const areas = new Map<string, Array<{ prefix: string } & CategoryData>>();
-			for (const [prefix, cat] of categories) {
-				const areaName = cat.areaFolder?.name ?? "(no area)";
-				if (!areas.has(areaName)) areas.set(areaName, []);
-				areas.get(areaName)!.push({ prefix, ...cat });
-			}
-
-			const sortedAreas = [...areas.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-
-			let body = "";
-			for (const [areaName, areaCats] of sortedAreas) {
-				body += `## ${areaName}\n\n`;
-				areaCats.sort((a, b) => a.prefix.localeCompare(b.prefix));
-				for (const cat of areaCats) {
-					body += `### ${cat.folder.name}\n\n`;
-					body += buildLinks(cat.files) + "\n\n";
-				}
-			}
-
-			const content =
-				buildFrontmatter(title, "00.00", createdDate, modifiedNow, systemCat.folder.name) +
-				`\n# ${title}\n\n` +
-				body;
-
-			await app.vault.modify(systemCat.indexFile, content);
-			rewriteCount++;
-		} catch (e) {
-			failures.indexes.push({ path: systemCat.indexFile.path, error: (e as Error).message });
-			console.warn("[jd] system reindex failed", systemCat.indexFile.path, e);
+			failures.indexes.push({ path: indexFile.path, error: (e as Error).message });
+			console.warn("[jd] reindexCategory failed", indexFile.path, e);
 		}
 	}
 
@@ -143,11 +97,17 @@ export async function indexVault(app: App): Promise<void> {
 		folderResult.failures.length +
 		syncResult.failures.length;
 	const errPart = errCount > 0 ? ` · ${errCount} errors (see console)` : "";
+	const presPart = allPreserved.length > 0
+		? ` · ${allPreserved.length} descriptions preserved (see console)`
+		: "";
 	new Notice(
 		`Reindexed ${rewriteCount} indexes, ${folderNoteCount} folder notes updated, ` +
 		`${categoryIndexResult.created} new category indexes, ` +
-		`${folderResult.created} new folder notes, ${syncResult.synced} IDs synced${errPart}`
+		`${folderResult.created} new folder notes, ${syncResult.synced} IDs synced${errPart}${presPart}`
 	);
+	if (allPreserved.length > 0) {
+		console.log("[jd] Preserved descriptions:", allPreserved);
+	}
 	if (errCount > 0) {
 		console.warn("[jd] indexVault errors:", {
 			indexes: failures.indexes,
@@ -166,15 +126,15 @@ export async function indexCategory(app: App, indexFile: TFile): Promise<void> {
 	}
 
 	const allFiles = app.vault.getFiles().filter((f) => f.extension === "md");
-	const now = moment().format("YYYY-MM-DDTHH:mm");
-	const modifiedNow = now;
 	const prefix = indexFile.basename.match(/^(\d{2})/)![1];
 	const folderPath = indexFile.parent?.path ?? "";
 
 	const failures: { path: string; error: string }[] = [];
+	const preserved: PreservedDescription[] = [];
 
 	try {
-		await reindexCategory(app, indexFile, allFiles, now, modifiedNow);
+		const result = await reindexCategory(app, indexFile, allFiles);
+		preserved.push(...result.preserved);
 	} catch (e) {
 		failures.push({ path: indexFile.path, error: (e as Error).message });
 		console.warn("[jd] reindexCategory failed", indexFile.path, e);
@@ -202,9 +162,15 @@ export async function indexCategory(app: App, indexFile: TFile): Promise<void> {
 
 	const errCount = failures.length + syncResult.failures.length;
 	const errPart = errCount > 0 ? ` · ${errCount} errors (see console)` : "";
+	const presPart = preserved.length > 0
+		? ` · ${preserved.length} descriptions preserved (see console)`
+		: "";
 	new Notice(
-		`Reindexed ${prefix}, ${folderNoteCount} folder notes, ${syncResult.synced} IDs synced${errPart}`
+		`Reindexed ${prefix}, ${folderNoteCount} folder notes, ${syncResult.synced} IDs synced${errPart}${presPart}`
 	);
+	if (preserved.length > 0) {
+		console.log("[jd] Preserved descriptions:", preserved);
+	}
 	if (errCount > 0) {
 		console.warn("[jd] indexCategory errors:", { failures, syncJdIds: syncResult.failures });
 	}
