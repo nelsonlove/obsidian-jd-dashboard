@@ -32,6 +32,7 @@ import { parseJDex, parseJDConfig, type JDex, type JDConfig } from "./jdex";
 import { FrontmatterNormalizer } from "./normalizer";
 import { getKeys } from "./keys";
 import { readFileSync, writeFileSync, watchFile, unwatchFile } from "fs";
+import { homedir } from "os";
 import { buildJdexFromVault, serializeJdex } from "./lib/jdex-from-vault";
 
 /**
@@ -379,7 +380,12 @@ export default class JDDashboardPlugin extends Plugin {
 	}
 
 	private resolvePath(p: string): string {
-		return p.replace("~", process.env.HOME ?? "");
+		// Only expand a leading `~` or `~/...` — never mid-string tildes.
+		// The iCloud-Obsidian vault path contains literal tildes
+		// (`iCloud~md~obsidian`) that naive `.replace("~", HOME)` would corrupt.
+		if (p === "~") return homedir();
+		if (p.startsWith("~/")) return homedir() + p.slice(1);
+		return p;
 	}
 
 	private loadJDex(): void {
