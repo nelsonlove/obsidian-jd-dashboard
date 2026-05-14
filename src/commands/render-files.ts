@@ -16,6 +16,7 @@
 
 import { type App, Notice, TFile, moment } from "obsidian";
 import { readdirSync, lstatSync, readlinkSync } from "fs";
+import { homedir } from "os";
 import { sep } from "path";
 import { type JDSettings, type LlmTaskId } from "../settings";
 import { getProvider, type ProviderId } from "../llm/provider";
@@ -162,8 +163,13 @@ async function markSurveyed(app: App, file: TFile): Promise<void> {
 // ── Path resolution ─────────────────────────────────────────────
 
 function resolveFilesystemPath(settings: JDSettings, file: TFile): PathResolution {
-	const home = process.env.HOME ?? "";
-	let root = settings.jdRoot.replace("~", home);
+	// Only expand a leading `~` or `~/...` — never mid-string tildes.
+	// See note on `JDDashboardPlugin.resolvePath` in main.ts.
+	const raw = settings.jdRoot;
+	let root: string;
+	if (raw === "~") root = homedir();
+	else if (raw.startsWith("~/")) root = homedir() + raw.slice(1);
+	else root = raw;
 	while (root.length > 1 && root.endsWith(sep)) root = root.slice(0, -1);
 	if (!root.startsWith(sep)) {
 		return { ok: false, error: `JD root '${settings.jdRoot}' is not absolute. Set it under plugin settings → Paths.` };
