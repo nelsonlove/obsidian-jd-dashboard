@@ -41,18 +41,31 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/;
 
 // ── Individual checks ────────────────────────────────────────────
 
-function checkRequiredFields(app: App, keys: JDKeys): ValidationIssue[] {
+/** Return the normalized list of frontmatter `tags` (without leading `#`). */
+function frontmatterTags(fm: unknown): string[] {
+	if (!fm || typeof fm !== "object") return [];
+	const raw = (fm as Record<string, unknown>).tags;
+	if (raw == null) return [];
+	const arr = Array.isArray(raw) ? raw : [raw];
+	return arr.map((t) => String(t).replace(/^#/, ""));
+}
+
+function checkRequiredFields(
+	app: App,
+	keys: JDKeys,
+	typeTagPrefix: string
+): ValidationIssue[] {
 	const issues: ValidationIssue[] = [];
-	const required = [keys.id, keys.title, keys.type];
+	const idTitleFields = [keys.id, keys.title];
 
 	for (const file of app.vault.getMarkdownFiles()) {
-		const match = ID_RE.exec(file.basename);
+		const match = file.basename.match(ID_RE);
 		if (!match) continue;
 
 		const cache = app.metadataCache.getFileCache(file);
 		const fm = cache?.frontmatter;
 
-		for (const field of required) {
+		for (const field of idTitleFields) {
 			if (!fm || !fm[field]) {
 				issues.push({
 					check: "required-fields",
@@ -62,6 +75,24 @@ function checkRequiredFields(app: App, keys: JDKeys): ValidationIssue[] {
 					suggestion: `Add ${field} to frontmatter`,
 				});
 			}
+		}
+
+		// Type marker — accept either `<typeKey>` frontmatter or any
+		// `<typeTagPrefix>*` tag (e.g. `jd/index`). The setting `typeAsTag`
+		// only governs write-mode; the validator accepts either form so
+		// users mid-migration aren't penalized.
+		const hasTypeField = !!(fm && fm[keys.type]);
+		const hasTypeTag = frontmatterTags(fm).some((t) =>
+			t.startsWith(typeTagPrefix)
+		);
+		if (!hasTypeField && !hasTypeTag) {
+			issues.push({
+				check: "required-fields",
+				severity: "error",
+				path: file.path,
+				message: `Missing type marker: no ${keys.type} frontmatter and no ${typeTagPrefix}* tag`,
+				suggestion: `Add a ${typeTagPrefix}<type> tag (e.g. ${typeTagPrefix}index) or ${keys.type}: <type> frontmatter`,
+			});
 		}
 	}
 
@@ -175,10 +206,7 @@ function isIndexFile(fm: unknown, keys: JDKeys, indexTag?: string): boolean {
 	const f = fm as Record<string, unknown>;
 	if (f[keys.type] === "index") return true;
 	if (!indexTag) return false;
-	const raw = f.tags;
-	if (raw == null) return false;
-	const tags = Array.isArray(raw) ? raw : [raw];
-	return tags.some((t) => String(t).replace(/^#/, "") === indexTag);
+	return frontmatterTags(fm).includes(indexTag);
 }
 
 function checkOrphanedFiles(app: App, keys: JDKeys, indexTag?: string): ValidationIssue[] {
@@ -463,11 +491,18 @@ export interface ValidatorOptions {
 	keys: JDKeys;
 	jdConfig?: JDConfig | null;
 	/**
-	 * Tag form of `jd-type: index` for users with `typeAsTag` settings on
-	 * (e.g. `jd/index`). When set, the orphan check exempts files carrying
-	 * this tag in addition to those with `jd-type: index` frontmatter.
+	 * Tag form of `jd-type: index` (e.g. `jd/index`). When set, the orphan
+	 * check exempts files carrying this tag in addition to those with
+	 * `jd-type: index` frontmatter. Independent of the `typeAsTag` write-mode
+	 * setting — pass this whenever the user uses `jd/`-prefixed tags at all.
 	 */
 	indexTag?: string;
+	/**
+	 * Prefix used for type tags (e.g. `jd/`). Files whose filename starts
+	 * with a JD ID satisfy the type-marker check via *either* `<typeKey>`
+	 * frontmatter or any tag starting with this prefix.
+	 */
+	typeTagPrefix?: string;
 }
 
 export function runValidation(
@@ -475,14 +510,21 @@ export function runValidation(
 	jdex: JDex | null,
 	options: ValidatorOptions
 ): ValidationReport {
-	const { staleDays = 90, skipChecks = [], keys, jdConfig = null, indexTag } = options;
+	const {
+		staleDays = 90,
+		skipChecks = [],
+		keys,
+		jdConfig = null,
+		indexTag,
+		typeTagPrefix = "jd/",
+	} = options;
 	const skip = new Set(skipChecks);
 
 	clearIgnoreCache();
 	const allIssues: ValidationIssue[] = [];
 
 	const checks: [string, () => ValidationIssue[]][] = [
-		["required-fields", () => checkRequiredFields(app, keys)],
+		["required-fields", () => checkRequiredFields(app, keys, typeTagPrefix)],
 		["date-format", () => checkDateFormats(app)],
 		["valid-category", () => checkValidCategories(app, keys)],
 		["duplicate-id", () => checkDuplicateIds(app, keys)],

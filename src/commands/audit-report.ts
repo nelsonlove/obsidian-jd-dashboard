@@ -88,8 +88,17 @@ export async function generateAuditReport(
 	options?: Omit<ValidatorOptions, "keys">
 ): Promise<void> {
 	const keys = getKeys(settings);
-	const indexTag = settings.typeAsTag ? typeTagFor(settings, "index") : undefined;
-	const report = runValidation(app, jdex, { ...options, keys, indexTag });
+	// Always pass indexTag and typeTagPrefix — the validator is a read-mode
+	// check that accepts either frontmatter or tag form, independent of the
+	// `typeAsTag` write-mode setting.
+	const indexTag = typeTagFor(settings, "index");
+	const typeTagPrefix = settings.typeTagPrefix ?? "jd/";
+	const report = runValidation(app, jdex, {
+		...options,
+		keys,
+		indexTag,
+		typeTagPrefix,
+	});
 	const lines: string[] = [];
 	const CHECK_LABELS = checkLabels(keys.id);
 
