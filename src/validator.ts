@@ -41,13 +41,22 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}/;
 
 // ── Individual checks ────────────────────────────────────────────
 
-/** Return the normalized list of frontmatter `tags` (without leading `#`). */
+/**
+ * Return the normalized list of frontmatter tags (without leading `#`).
+ *
+ * Honors both `tags:` and `tag:` keys (Obsidian's raw frontmatter
+ * preserves whichever the user wrote — only the higher-level
+ * `cache.tags` aggregate normalizes them).
+ */
 function frontmatterTags(fm: unknown): string[] {
 	if (!fm || typeof fm !== "object") return [];
-	const raw = (fm as Record<string, unknown>).tags;
-	if (raw == null) return [];
-	const arr = Array.isArray(raw) ? raw : [raw];
-	return arr.map((t) => String(t).replace(/^#/, ""));
+	const f = fm as Record<string, unknown>;
+	const collect = (raw: unknown): string[] => {
+		if (raw == null) return [];
+		const arr = Array.isArray(raw) ? raw : [raw];
+		return arr.map((t) => String(t).replace(/^#/, ""));
+	};
+	return [...collect(f.tags), ...collect(f.tag)];
 }
 
 function checkRequiredFields(
