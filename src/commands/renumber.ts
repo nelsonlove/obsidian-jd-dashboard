@@ -39,7 +39,18 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 		return;
 	}
 
-	const occupant = findByJdId(app, target, file);
+	const occupants = findByJdId(app, target, file);
+	if (occupants.length > 1) {
+		new Notice(
+			`Renumber: ${occupants.length} files already claim ID ${target} — resolve the duplicates first (see console). Source unchanged.`
+		);
+		console.warn(
+			"[jd] renumber: duplicate occupants for", target,
+			occupants.map((o) => o.path)
+		);
+		return;
+	}
+	const occupant: TFile | null = occupants[0] ?? null;
 	let displaceId: string | null = null;
 
 	if (occupant) {
@@ -69,7 +80,7 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 				return;
 			}
 			displaceId = manual.trim();
-			if (findByJdId(app, displaceId, occupant)) {
+			if (findByJdId(app, displaceId, occupant).length > 0) {
 				new Notice(`${displaceId} is also taken — pick a free ID and try again`);
 				return;
 			}
@@ -104,14 +115,23 @@ export async function renumberCommand(app: App, file: TFile): Promise<void> {
 
 // ── Lookups ─────────────────────────────────────────────────────
 
-function findByJdId(app: App, id: string, exclude: TFile): TFile | null {
+/**
+ * Return *all* files claiming `id` (by frontmatter `jd-id` or by filename
+ * prefix). Returning the full set lets the caller distinguish the safe
+ * "exactly one occupant, displace it" path from the unsafe "multiple
+ * occupants, vault is already drifted" path. A file matching both
+ * predicates counts once.
+ */
+function findByJdId(app: App, id: string, exclude: TFile): TFile[] {
+	const matches: TFile[] = [];
 	for (const f of app.vault.getMarkdownFiles()) {
 		if (f.path === exclude.path) continue;
 		const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-		if (fm && fm["jd-id"] === id) return f;
-		if (f.basename.startsWith(`${id} `)) return f;
+		const fmMatch = fm && fm["jd-id"] === id;
+		const fnMatch = f.basename.startsWith(`${id} `);
+		if (fmMatch || fnMatch) matches.push(f);
 	}
-	return null;
+	return matches;
 }
 
 function nextAvailableId(app: App, categoryNum: string): string | null {
