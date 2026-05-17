@@ -35,6 +35,9 @@ const IGNORE_NAMES = new Set([".DS_Store", ".localized", "Thumbs.db"]);
 /** Subdirs whose name matches a JD-ID pattern have their own notes — skip them. */
 const ID_SUBDIR_RE = /^(\d{2}\.\d{2}|\d{5})\s+/;
 
+/** Extract a JD ID prefix from a filename basename (same shape as ID_SUBDIR_RE). */
+const FILENAME_ID_RE = /^(\d{2}\.\d{2}|\d{5})\s+/;
+
 /** Discriminated union — each kind carries exactly the fields it needs. */
 type ListedEntry =
 	| { kind: "file"; name: string; size: number }
@@ -65,6 +68,20 @@ export async function renderFiles(
 	const id = fm?.[keys.id];
 	if (!id || typeof id !== "string") {
 		new Notice("Render Files: active note has no JD ID in frontmatter.");
+		return;
+	}
+
+	// Filesystem-path resolution downstream derives the directory from
+	// `file.basename` / `file.parent`, not from this `id`. If the filename
+	// JD prefix has drifted from the frontmatter `id`, we'd be making a
+	// paid LLM call against the wrong directory. Abort and tell the user
+	// to reconcile via drift-report rather than silently mispoint.
+	const filenameIdMatch = file.basename.match(FILENAME_ID_RE);
+	const filenameId = filenameIdMatch ? filenameIdMatch[1] : null;
+	if (filenameId !== id) {
+		new Notice(
+			`Render Files: filename JD ID ${filenameId ?? "(none)"} doesn't match frontmatter ${keys.id} = ${id}. Reconcile via drift-report, then retry.`
+		);
 		return;
 	}
 
