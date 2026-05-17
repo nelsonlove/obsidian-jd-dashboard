@@ -65,12 +65,22 @@ export function isAreaManagement(prefix: string): boolean {
 	return prefix.length === 2 && prefix !== "00" && prefix.endsWith("0");
 }
 
+/**
+ * Read `created:` from a file's YAML frontmatter. Scoped to the leading
+ * `---`-delimited region — a `created:` token in the body (prose, code
+ * block, embedded YAML example) won't be matched. Returns `fallback`
+ * when the file is missing, has no frontmatter, or has no `created:`
+ * inside it.
+ */
 export async function getCreatedDate(app: App, file: TFile, fallback: string): Promise<string> {
 	if (!app.vault.getAbstractFileByPath(file.path)) return fallback;
 	const existing = await app.vault.read(file);
-	const match = existing.match(/^created:\s*(.+)$/m);
-	if (match) return match[1].trim();
-	return fallback;
+	if (!existing.startsWith("---\n")) return fallback;
+	const close = existing.indexOf("\n---\n", 4);
+	if (close === -1) return fallback;
+	const fmText = existing.slice(4, close + 1);
+	const match = fmText.match(/^created:\s*(.+)$/m);
+	return match ? match[1].trim() : fallback;
 }
 
 export function buildFrontmatter(

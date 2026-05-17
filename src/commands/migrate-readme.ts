@@ -29,13 +29,14 @@ interface MigrateResult {
 	scanned: number;
 	migrated: number;
 	skipped: { path: string; reason: string }[];
+	preserved: { path: string; aliases: string[] }[];
 }
 
 export async function migrateReadmeFiles(
 	app: App,
 	keys: JDKeys
 ): Promise<MigrateResult> {
-	const result: MigrateResult = { scanned: 0, migrated: 0, skipped: [] };
+	const result: MigrateResult = { scanned: 0, migrated: 0, skipped: [], preserved: [] };
 
 	const targets: TFile[] = [];
 	for (const file of app.vault.getMarkdownFiles()) {
@@ -65,24 +66,40 @@ export async function migrateReadmeFiles(
 
 		try {
 			const content = await app.vault.read(file);
-			const rewritten = rewriteFrontmatter(content, keys);
+			const { text: rewritten, userAliases } = rewriteFrontmatter(content, keys, parent.name);
 			if (rewritten !== content) {
 				await app.vault.modify(file, rewritten);
 			}
 			await app.fileManager.renameFile(file, newPath);
 			result.migrated++;
+			if (userAliases.length > 0) {
+				result.preserved.push({ path: newPath, aliases: userAliases });
+			}
 		} catch (e) {
 			skip(`error: ${(e as Error).message}`);
 		}
 	}
 
+	const preservedFragment =
+		result.preserved.length > 0
+			? ` Aliases retained in ${result.preserved.length} file(s) — see console.`
+			: "";
 	new Notice(
-		`Migrated ${result.migrated}/${result.scanned} +README files. Skipped: ${result.skipped.length}.`
+		`Migrated ${result.migrated}/${result.scanned} +README files.` +
+			` Skipped: ${result.skipped.length}.` +
+			preservedFragment
 	);
 	if (result.skipped.length > 0) {
 		console.group("README migration — skipped files");
 		for (const s of result.skipped) {
 			console.log(`${s.path}: ${s.reason}`);
+		}
+		console.groupEnd();
+	}
+	if (result.preserved.length > 0) {
+		console.group("README migration — user aliases preserved");
+		for (const p of result.preserved) {
+			console.log(`${p.path}: ${p.aliases.join(", ")}`);
 		}
 		console.groupEnd();
 	}
@@ -93,13 +110,23 @@ export async function migrateReadmeFiles(
 /**
  * Rewrite the frontmatter:
  *   - strip "+README" suffix from the ID value
- *   - drop the auto-generated `aliases:` block (a bare list of one alias
- *     equal to the parent folder name)
+ *   - drop an auto-generated `aliases:` block (single alias matching the
+ *     parent folder name); preserve any aliases block that contains user
+ *     additions so we don't silently lose data
+ *
+ * Returns the rewritten content plus the list of aliases retained (so the
+ * caller can surface them to the user — preserved aliases may want a
+ * manual once-over).
  */
-function rewriteFrontmatter(content: string, keys: JDKeys): string {
-	if (!content.startsWith("---\n")) return content;
+function rewriteFrontmatter(
+	content: string,
+	keys: JDKeys,
+	parentName: string
+): { text: string; userAliases: string[] } {
+	const empty = { text: content, userAliases: [] };
+	if (!content.startsWith("---\n")) return empty;
 	const close = content.indexOf("\n---\n", 4);
-	if (close === -1) return content;
+	if (close === -1) return empty;
 
 	const fmText = content.slice(4, close + 1);
 	const body = content.slice(close + 5);
@@ -111,6 +138,7 @@ function rewriteFrontmatter(content: string, keys: JDKeys): string {
 	const KEY_LINE_RE = /^([a-zA-Z][\w-]*):\s*(.*)$/;
 
 	const out: string[] = [];
+	const userAliases: string[] = [];
 	let i = 0;
 	while (i < lines.length) {
 		const line = lines[i];
@@ -126,10 +154,31 @@ function rewriteFrontmatter(content: string, keys: JDKeys): string {
 			}
 		}
 
-		// Skip aliases block (key + indented children)
 		if (m && m[1] === "aliases") {
-			i++;
-			while (i < lines.length && /^\s+-\s/.test(lines[i])) i++;
+			const inlineValue = m[2].trim();
+			const blockLines = [line];
+			let j = i + 1;
+			while (j < lines.length && /^\s+-\s/.test(lines[j])) {
+				blockLines.push(lines[j]);
+				j++;
+			}
+			const aliases = parseAliases(inlineValue, blockLines.slice(1));
+
+			// Auto-generated case: exactly one alias matching the parent
+			// folder name. Drop the whole block — the bare filename will
+			// resolve once the file is renamed to `parent.name.md`.
+			if (aliases.length === 1 && aliases[0] === parentName) {
+				i = j;
+				continue;
+			}
+
+			// Anything else (user-added aliases, multiple aliases, an
+			// empty `aliases: []`) passes through verbatim. We don't try
+			// to re-emit canonically because the original format may have
+			// been the user's choice.
+			out.push(...blockLines);
+			if (aliases.length > 0) userAliases.push(...aliases);
+			i = j;
 			continue;
 		}
 
@@ -137,5 +186,34 @@ function rewriteFrontmatter(content: string, keys: JDKeys): string {
 		i++;
 	}
 
-	return `---\n${out.join("\n")}---\n${body}`;
+	return { text: `---\n${out.join("\n")}---\n${body}`, userAliases };
+}
+
+/**
+ * Extract alias values from either form. Block form: child lines like
+ * `    - Foo`. Inline form: `[Foo, Bar]`, `[]`, or a bare scalar like
+ * `Foo`. Quotes are stripped. Doesn't handle YAML edge cases (escaped
+ * commas inside quoted strings, flow-style nested structures); migration
+ * inputs are constrained enough that the simple split is fine.
+ */
+function parseAliases(inlineValue: string, childLines: string[]): string[] {
+	if (childLines.length > 0) {
+		const out: string[] = [];
+		for (const child of childLines) {
+			const m = child.match(/^\s+-\s+(.+)$/);
+			if (m) out.push(unquote(m[1].trim()));
+		}
+		return out;
+	}
+	if (!inlineValue) return [];
+	if (inlineValue.startsWith("[") && inlineValue.endsWith("]")) {
+		const inner = inlineValue.slice(1, -1).trim();
+		if (!inner) return [];
+		return inner.split(",").map((s) => unquote(s.trim()));
+	}
+	return [unquote(inlineValue)];
+}
+
+function unquote(s: string): string {
+	return s.replace(/^['"]|['"]$/g, "");
 }
