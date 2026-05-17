@@ -78,8 +78,13 @@ export function inferType(
 	options: { inferForExpanded?: boolean; subidTypes?: Record<string, string> } = {}
 ): string | null {
 	const subidTypes = options.subidTypes ?? DEFAULT_SUBID_TYPES;
+	// Split on '+' to get the suffix tokens of the ID (e.g. `06.13+REPORT+v2`
+	// → `["06.13", "REPORT", "v2"]`, suffix tokens being everything after
+	// index 0, re-prefixed). Whole-token comparison so a user-configured
+	// `+RE` doesn't silently swallow `+REPORT`.
+	const idTokens = jdId.toUpperCase().split("+").slice(1).map((t) => "+" + t);
 	for (const [suffix, type] of Object.entries(subidTypes)) {
-		if (jdId.toUpperCase().includes(suffix.toUpperCase())) return type;
+		if (idTokens.includes(suffix.toUpperCase())) return type;
 	}
 	if (jdId.includes("+")) return "meta";
 

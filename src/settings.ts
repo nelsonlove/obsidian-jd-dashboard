@@ -6,6 +6,7 @@ import { type App, Notice, PluginSettingTab, SecretComponent, Setting } from "ob
 import type JDDashboardPlugin from "./main";
 import { getProvider, listProviders, type ProviderId } from "./llm/provider";
 import { getApiKey, hasApiKey, setApiKey } from "./llm/secrets";
+import { DEFAULT_SUBID_TYPES } from "./normalizer";
 
 /** Registry of LLM-driven tasks. Add a row here to expose a new per-task model picker. */
 export const LLM_TASKS = [
@@ -156,7 +157,7 @@ export const DEFAULT_SETTINGS: JDSettings = {
 	typeTagPrefix: "jd/",
 	typeTagMap: {},
 
-	subidTypes: { "+REPORT": "report", "+AUDIT": "audit" },
+	subidTypes: { ...DEFAULT_SUBID_TYPES },
 
 	writeTypeForGenericIds: true,
 
