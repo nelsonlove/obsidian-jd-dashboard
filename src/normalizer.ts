@@ -53,7 +53,13 @@ const ZERO_TYPES: Record<string, string> = {
 	"09": "archive",
 };
 
-const SUBID_TYPES: Record<string, string> = {
+/**
+ * Default `+SUFFIX → type` map. Used by `inferType` when no per-call
+ * override is supplied. Lifted to settings (`subidTypes`) so users can
+ * add their own suffixes from the GUI; this constant is the seed value
+ * and the fallback for code paths that don't yet thread settings.
+ */
+export const DEFAULT_SUBID_TYPES: Record<string, string> = {
 	"+REPORT": "report",
 	"+AUDIT": "audit",
 };
@@ -69,10 +75,11 @@ function isExpandedFormat(jdId: string): boolean {
 
 export function inferType(
 	jdId: string,
-	options: { inferForExpanded?: boolean } = {}
+	options: { inferForExpanded?: boolean; subidTypes?: Record<string, string> } = {}
 ): string | null {
-	for (const [suffix, type] of Object.entries(SUBID_TYPES)) {
-		if (jdId.toUpperCase().includes(suffix)) return type;
+	const subidTypes = options.subidTypes ?? DEFAULT_SUBID_TYPES;
+	for (const [suffix, type] of Object.entries(subidTypes)) {
+		if (jdId.toUpperCase().includes(suffix.toUpperCase())) return type;
 	}
 	if (jdId.includes("+")) return "meta";
 
@@ -254,6 +261,7 @@ export class FrontmatterNormalizer {
 				.trim();
 			const inferred = inferType(idVal, {
 				inferForExpanded: this.settings.inferTypeForExpandedIds,
+				subidTypes: this.settings.subidTypes,
 			});
 
 			if (inferred && shouldWriteType(this.settings, inferred)) {

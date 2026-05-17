@@ -75,6 +75,15 @@ export interface JDSettings {
 	/** Per-type override map: typeValue → exact tag (no prefix added) */
 	typeTagMap: Record<string, string>;
 
+	// ── SubID suffix → type map ──────────────────────────────────
+	/**
+	 * `+SUFFIX → type` map consulted by the normalizer when inferring types
+	 * for suffixed IDs like `06.13+REPORT`. User-editable via the settings
+	 * UI so new suffixes can be added without rebuilding. See
+	 * `DEFAULT_SUBID_TYPES` in normalizer.ts for the seed value.
+	 */
+	subidTypes: Record<string, string>;
+
 	// ── Generic-id behavior ──────────────────────────────────────
 	/** Whether to persist type when the inferred value is the generic `id` */
 	writeTypeForGenericIds: boolean;
@@ -146,6 +155,8 @@ export const DEFAULT_SETTINGS: JDSettings = {
 	typeAsTag: false,
 	typeTagPrefix: "jd/",
 	typeTagMap: {},
+
+	subidTypes: { "+REPORT": "report", "+AUDIT": "audit" },
 
 	writeTypeForGenericIds: true,
 
@@ -479,6 +490,23 @@ export class JDSettingsTab extends PluginSettingTab {
 					.setValue(tagMapToText(this.plugin.settings.typeTagMap))
 					.onChange(async (value) => {
 						this.plugin.settings.typeTagMap = tagMapFromText(value);
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Sub-ID suffix types")
+			.setDesc(
+				"One per line as '+SUFFIX: type'. Match is case-insensitive against the JD ID. Defaults to '+REPORT: report' and '+AUDIT: audit'."
+			)
+			.addTextArea((text) => {
+				text.inputEl.rows = 5;
+				text.inputEl.style.fontFamily = "var(--font-monospace)";
+				text
+					.setPlaceholder("+REPORT: report\n+AUDIT: audit")
+					.setValue(tagMapToText(this.plugin.settings.subidTypes))
+					.onChange(async (value) => {
+						this.plugin.settings.subidTypes = tagMapFromText(value);
 						await this.plugin.saveSettings();
 					});
 			});

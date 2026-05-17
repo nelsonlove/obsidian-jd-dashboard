@@ -361,6 +361,7 @@ export class DriftPanelView extends ItemView {
 		const inferred =
 			inferType(id, {
 				inferForExpanded: settings.inferTypeForExpandedIds,
+				subidTypes: settings.subidTypes,
 			}) ?? "id";
 		const typeLines = formatTypeFrontmatter(settings, inferred);
 
