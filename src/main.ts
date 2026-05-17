@@ -27,6 +27,7 @@ import {
 	newStemFromTemplate,
 } from "./commands/new-from-template";
 import { indexVault, indexCategory } from "./commands/index-vault";
+import { registerFileMenu } from "./menus/file-menu";
 import { scanDrift } from "./scanner";
 import { parseJDex, parseJDConfig, type JDex, type JDConfig } from "./jdex";
 import { FrontmatterNormalizer } from "./normalizer";
@@ -284,6 +285,12 @@ export default class JDDashboardPlugin extends Plugin {
 				return true;
 			},
 		});
+
+		// File-explorer right-click submenu — same handlers as the palette
+		// commands above, surfaced as a "Johnny Decimal ▸" submenu on .md
+		// files. `settings` is read lazily so user changes (e.g. templates
+		// folder) take effect without re-registering the event.
+		registerFileMenu(this, () => this.settings);
 
 		// Settings tab
 		this.addSettingTab(new JDSettingsTab(this.app, this));
