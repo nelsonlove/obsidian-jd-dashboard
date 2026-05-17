@@ -120,6 +120,10 @@ export function buildLinks(files: TFile[]): string {
 /**
  * Returns category-member files, EXCLUDING the index file itself (otherwise
  * the regenerated JDex would contain a wikilink back to itself).
+ *
+ * Path matching is separator-bounded — a category at `"06 Foo"` doesn't
+ * scoop files from a sibling `"06 Foo Long"`. Same scoping invariant as
+ * `indexCategory` uses.
  */
 export function getCategoryFiles(
 	allFiles: TFile[],
@@ -131,7 +135,9 @@ export function getCategoryFiles(
 		.filter((f) => {
 			if (excludePath && f.path === excludePath) return false;
 			if (!f.basename.startsWith(prefix)) return false;
-			if (!f.parent || !f.parent.path.startsWith(folderPath)) return false;
+			if (!f.parent) return false;
+			const p = f.parent.path;
+			if (p !== folderPath && !p.startsWith(folderPath + "/")) return false;
 			return true;
 		})
 		.sort((a, b) => a.basename.localeCompare(b.basename));

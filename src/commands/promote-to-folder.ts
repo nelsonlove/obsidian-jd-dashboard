@@ -42,7 +42,11 @@ export async function promoteToFolder(app: App, file: TFile | null): Promise<voi
 	}
 
 	const folderName = file.basename;
-	const folderPath = `${parent.path}/${folderName}`;
+	// Obsidian represents the vault root as parent.path === "/". Concatenating
+	// it would yield `//folderName` — same idiom as renumber.ts / index-vault.ts:
+	// treat root as an empty prefix.
+	const parentPath = parent.path !== "/" ? parent.path : "";
+	const folderPath = parentPath ? `${parentPath}/${folderName}` : folderName;
 	const newFilePath = `${folderPath}/${file.name}`;
 
 	if (app.vault.getAbstractFileByPath(folderPath)) {

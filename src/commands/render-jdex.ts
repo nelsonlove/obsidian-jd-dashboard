@@ -24,6 +24,7 @@ import { getKeys, formatTypeFrontmatter } from "../keys";
 
 const CATEGORY_JDEX_RE = /^(\d{2})\.00 JDex for category \1\.md$/;
 const CATEGORY_FOLDER_RE = /^(\d{2})\s+(.+)$/;
+const AREA_FOLDER_RE = /^\d{2}-\d{2}\s/;
 const FIVE_DIGIT_ITEM_RE = /^(\d{5})\s+(.+)$/;
 const ID_BASENAME_RE = /^(\d{2}\.\d{2}|\d{5})\s+(.+)$/;
 
@@ -295,6 +296,9 @@ function findCategoryFolder(app: App, catNum: string): TFolder | null {
 	const root = app.vault.getRoot();
 	for (const areaChild of root.children) {
 		if (!(areaChild instanceof TFolder)) continue;
+		// Skip non-area top-level folders so e.g. `Archives/06 Old Foo/`
+		// isn't selected ahead of the real `00-09 System/06 Foo/`.
+		if (!AREA_FOLDER_RE.test(areaChild.name)) continue;
 		for (const catChild of areaChild.children) {
 			if (!(catChild instanceof TFolder)) continue;
 			const m = catChild.name.match(CATEGORY_FOLDER_RE);

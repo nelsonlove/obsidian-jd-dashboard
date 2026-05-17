@@ -128,6 +128,19 @@ export async function indexCategory(app: App, indexFile: TFile): Promise<void> {
 	const allFiles = app.vault.getFiles().filter((f) => f.extension === "md");
 	const prefix = indexFile.basename.match(/^(\d{2})/)![1];
 	const folderPath = indexFile.parent?.path ?? "";
+	if (!folderPath) {
+		// indexFile somehow has no parent — bail rather than match every
+		// file in the vault via empty-prefix startsWith.
+		new Notice("Index file has no parent folder; cannot scope reindex.");
+		return;
+	}
+
+	// Bare `startsWith(folderPath)` matches sibling-prefix folders like
+	// `06 Foo` vs `06 Foo Long`, scooping unrelated files into this
+	// category's reindex. Require either an exact match (the folder note
+	// itself) or a child path (`folderPath + "/"`).
+	const inCategoryScope = (path: string) =>
+		path === folderPath || path.startsWith(folderPath + "/");
 
 	const failures: { path: string; error: string }[] = [];
 	const preserved: PreservedDescription[] = [];
@@ -146,7 +159,7 @@ export async function indexCategory(app: App, indexFile: TFile): Promise<void> {
 			f.parent &&
 			f.basename === f.parent.name &&
 			!/^\d{2}\.00\b/.test(f.basename) &&
-			f.parent.path.startsWith(folderPath)
+			inCategoryScope(f.parent.path)
 	);
 	for (const fn of folderNotes) {
 		try {
@@ -157,7 +170,7 @@ export async function indexCategory(app: App, indexFile: TFile): Promise<void> {
 		}
 	}
 
-	const catFiles = allFiles.filter((f) => f.parent?.path.startsWith(folderPath));
+	const catFiles = allFiles.filter((f) => f.parent && inCategoryScope(f.parent.path));
 	const syncResult = await syncJdIds(app, catFiles);
 
 	const errCount = failures.length + syncResult.failures.length;
