@@ -1,5 +1,7 @@
 # Johnny Decimal Dashboard — Obsidian Plugin
 
+> [!warning] Archived — this plugin was folded into the [`jd-numbering`](https://github.com/nelsonlove/jd-numbering) monorepo (under `dashboard/`, with full history) and is no longer developed here. Kept read-only for reference.
+
 Live JD system awareness inside the Obsidian vault. Inbox dashboard, drift detection, vault auditing, frontmatter normalization, and quick ID navigation.
 
 Companion plugin to the [jd-tools](https://github.com/nelsonlove/jd-tools) CLI suite. Reads the same `jd-index.yaml` and `jd.yaml` that jd-cli uses, but has no runtime dependency on it — either tool can be installed and used independently. The two coordinate purely through the shared YAML files.
