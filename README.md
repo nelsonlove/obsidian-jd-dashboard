@@ -1,10 +1,14 @@
 # Johnny Decimal Dashboard — Obsidian Plugin
 
-> [!warning] Archived — this plugin was folded into the [`jd-numbering`](https://github.com/nelsonlove/jd-numbering) monorepo (under `dashboard/`, with full history) and is no longer developed here. Kept read-only for reference.
-
 Live JD system awareness inside the Obsidian vault. Inbox dashboard, drift detection, vault auditing, frontmatter normalization, and quick ID navigation.
 
 Companion plugin to the [jd-tools](https://github.com/nelsonlove/jd-tools) CLI suite. Reads the same `jd-index.yaml` and `jd.yaml` that jd-cli uses, but has no runtime dependency on it — either tool can be installed and used independently. The two coordinate purely through the shared YAML files.
+
+## Install (BRAT)
+
+1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) community plugin.
+2. BRAT → **Add beta plugin** → `nelsonlove/obsidian-jd-dashboard`.
+3. Enable **Johnny Decimal Dashboard** in Community plugins.
 
 ## Features
 
@@ -212,11 +216,14 @@ surveyed: 2026-03-31
 ## Development
 
 ```sh
-cd ~/repos/jd-obsidian
 npm install
 npm run dev     # watch mode — rebuilds on change
 npm run build   # production build
 ```
+
+Releases are cut by pushing a bare `X.Y.Z` tag matching `manifest.json`; CI
+builds the plugin and publishes a GitHub Release with the built files attached,
+which is what BRAT installs.
 
 The plugin is symlinked into the vault at `.obsidian/plugins/jd-dashboard/` for development. After building, reload Obsidian (Cmd+R) to pick up changes.
 

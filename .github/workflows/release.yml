@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag to build the plugin and publish a GitHub Release with the built
+# files attached. BRAT reads the root manifest.json for the version, then
+# installs the assets from the Release tagged with that version.
+#
+# The tag MUST be a bare `X.Y.Z` (Obsidian convention — no `v` prefix) that
+# equals manifest.json. The trigger is deliberately broad (`*`) so a mistyped
+# tag (e.g. `v0.2.1`) still starts the job and FAILS LOUDLY in "Resolve version"
+# rather than silently doing nothing.
+#
+# workflow_dispatch re-publishes the current manifest version (e.g. to
+# regenerate a missing Release), anchored to the checked-out commit.
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+# The Release is created with this repo's own GITHUB_TOKEN.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      # The published version is ALWAYS manifest.json — never operator input —
+      # so a Release can't be mislabeled relative to the code it ships. On a tag
+      # push we additionally require the tag to be a bare semver equal to the
+      # manifest, or fail loudly.
+      - name: Resolve version
+        id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          MAN="$(node -p "require('./manifest.json').version")"
+          if [ "$EVENT" = "push" ]; then
+            if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag '$TAG' is not a bare X.Y.Z version (no 'v' prefix). Retag, e.g. '$MAN'."
+              exit 1
+            fi
+            if [ "$TAG" != "$MAN" ]; then
+              echo "::error::Tag '$TAG' != manifest.json version '$MAN'. Bump the manifest or fix the tag."
+              exit 1
+            fi
+          fi
+          echo "version=$MAN" >> "$GITHUB_OUTPUT"
+          echo "Publishing $MAN"
+
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+          test -f main.js
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ASSETS="main.js manifest.json"
+          [ -f styles.css ] && ASSETS="$ASSETS styles.css"
+          [ -f versions.json ] && ASSETS="$ASSETS versions.json"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" $ASSETS --clobber
+          else
+            # --target anchors the auto-created tag to the checked-out commit
+            # (matters for a manual dispatch, where no tag was pushed).
+            gh release create "$VERSION" $ASSETS \
+              --target "$SHA" \
+              --title "$VERSION" \
+              --notes "Automated release for Johnny Decimal Dashboard $VERSION."
+          fi

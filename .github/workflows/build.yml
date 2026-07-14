@@ -14,8 +14,7 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
-# Defense-in-depth: GITHUB_TOKEN gets read-only access. Bump per-job if
-# a future step needs to write (e.g. an auto-release job posting assets).
+# Defense-in-depth: GITHUB_TOKEN gets read-only access.
 permissions:
   contents: read
 
@@ -32,6 +31,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
