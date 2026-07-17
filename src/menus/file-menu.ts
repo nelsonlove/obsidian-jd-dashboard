@@ -16,7 +16,6 @@ import type { Plugin } from "obsidian";
 import type { JDSettings } from "../settings";
 
 import { promoteToFolder } from "../commands/promote-to-folder";
-import { renderFiles } from "../commands/render-files";
 import { renumberCommand } from "../commands/renumber";
 import { indexFolderNote } from "../commands/index-folder-note";
 import { indexCategory } from "../commands/index-vault";
@@ -118,13 +117,6 @@ const ITEMS: readonly MenuItemDef[] = [
 		section: "index",
 		visible: (file) => CATEGORY_ZERO_RE.test(file.basename),
 		run: (app, file) => indexCategory(app, file),
-	},
-	{
-		title: "Render filesystem contents",
-		icon: "folder-search",
-		section: "index",
-		visible: () => true,
-		run: (app, file, settings) => renderFiles(app, settings, file),
 	},
 ];
 

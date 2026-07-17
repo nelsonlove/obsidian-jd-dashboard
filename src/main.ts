@@ -16,7 +16,6 @@ import { generateAuditReport } from "./commands/audit-report";
 import { migrateReadmeFiles } from "./commands/migrate-readme";
 import { renderCategoryJdex } from "./commands/render-jdex";
 import { promoteToFolder } from "./commands/promote-to-folder";
-import { renderFiles } from "./commands/render-files";
 import { renumberCommand } from "./commands/renumber";
 import { indexFolderNote } from "./commands/index-folder-note";
 import { standardZerosCommand } from "./commands/standard-zeros";
@@ -123,7 +122,6 @@ export default class JDDashboardPlugin extends Plugin {
 			callback: () =>
 				runCmd("Run vault audit", () =>
 					generateAuditReport(this.app, this.jdex, this.settings, {
-						staleDays: this.settings.staleDays,
 						jdConfig: this.jdConfig,
 					})
 				),
@@ -163,19 +161,6 @@ export default class JDDashboardPlugin extends Plugin {
 				if (!file.path.endsWith(".md")) return false;
 				if (checking) return true;
 				runCmd("Promote note to folder", () => promoteToFolder(this.app, file));
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "render-files",
-			name: "Render filesystem contents",
-			checkCallback: (checking) => {
-				const file = this.app.workspace.getActiveFile();
-				if (!file) return false;
-				if (!file.path.endsWith(".md")) return false;
-				if (checking) return true;
-				runCmd("Render filesystem contents", () => renderFiles(this.app, this.settings, file));
 				return true;
 			},
 		});
@@ -315,7 +300,6 @@ export default class JDDashboardPlugin extends Plugin {
 				setTimeout(() => {
 					runCmd("Startup vault audit", () =>
 						generateAuditReport(this.app, this.jdex, this.settings, {
-							staleDays: this.settings.staleDays,
 							jdConfig: this.jdConfig,
 						})
 					);
@@ -374,11 +358,13 @@ export default class JDDashboardPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		const data = (await this.loadData()) ?? {};
+		// Retired in 0.3.0 (render-files + stale-surveyed removal): strip so
+		// saveSettings stops re-persisting dead keys from older data.json.
+		for (const k of ["llmProviders", "llmTaskModels", "renderFilesPrompt", "staleDays"]) {
+			delete (data as Record<string, unknown>)[k];
+		}
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 	}
 
 	async saveSettings(): Promise<void> {
