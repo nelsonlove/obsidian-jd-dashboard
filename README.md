@@ -28,13 +28,13 @@ Status bar shows "JD: N drifted" — click to open the panel.
 Notes can opt out of any drift check via the [`jd-ignore`](#opting-out-with-jd-ignore) frontmatter field; ignores cascade from folder cover notes.
 
 ### Vault Audit
-Comprehensive health check with 10 validation rules across 3 severity levels:
+Comprehensive health check with 9 validation rules across 3 severity levels:
 
 | Severity | Checks |
 |----------|--------|
 | Error | Missing required fields, invalid date formats, invalid categories, duplicate IDs |
 | Warning | Orphaned files, title mismatches, missing stubs |
-| Info | Broken wikilinks, empty notes, stale surveyed dates |
+| Info | Broken wikilinks, empty notes |
 
 Generates a markdown report at `00.00+REPORT JD vault audit.md`. Optional auto-run on startup. Honors `jd-ignore`.
 
@@ -104,7 +104,6 @@ Converts the active ID note (`06.13 Bar.md`) into a same-named folder with the n
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Show empty inboxes | off | Show inbox folders with 0 items |
-| Stale surveyed threshold | 90 days | Days before surveyed date is flagged |
 | Audit on startup | off | Run vault audit when Obsidian opens |
 
 ### Frontmatter keys
@@ -179,7 +178,7 @@ jd-ignore: title-mismatch, empty-note # comma-separated form
 
 **Cascade:** the ignore list of a folder's cover note also applies to every note in that folder (and recursively). Set `jd-ignore: true` on `92001 Substrate/92001 Substrate.md` to silence the whole subtree.
 
-Recognized check names match what the audit/drift reports emit: `missing-frontmatter`, `id-mismatch`, `wrong-folder`, `title-mismatch`, `required-fields`, `date-format`, `valid-category`, `duplicate-id`, `orphaned-file`, `broken-wikilink`, `empty-note`, `stale-surveyed`, `missing-stub`.
+Recognized check names match what the audit/drift reports emit: `missing-frontmatter`, `id-mismatch`, `wrong-folder`, `title-mismatch`, `required-fields`, `date-format`, `valid-category`, `duplicate-id`, `orphaned-file`, `broken-wikilink`, `empty-note`, `missing-stub`.
 
 ## Frontmatter schema
 

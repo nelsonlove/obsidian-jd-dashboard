@@ -41,7 +41,6 @@ function checkLabels(idKey: string): Record<string, string> {
 		"orphaned-file": "Orphaned files",
 		"broken-wikilink": "Broken wikilinks",
 		"empty-note": "Empty notes",
-		"stale-surveyed": "Stale surveyed dates",
 		"title-mismatch": "Title mismatches",
 		"missing-stub": "Missing note stubs",
 		"unregistered-id": "Unregistered IDs (in vault, not in JDex YAML)",

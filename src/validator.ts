@@ -323,36 +323,6 @@ function checkEmptyNotes(app: App): ValidationIssue[] {
 	return issues;
 }
 
-function checkStaleSurveyed(app: App, staleDays: number): ValidationIssue[] {
-	const issues: ValidationIssue[] = [];
-	const cutoff = new Date();
-	cutoff.setDate(cutoff.getDate() - staleDays);
-
-	for (const file of app.vault.getMarkdownFiles()) {
-		const cache = app.metadataCache.getFileCache(file);
-		const fm = cache?.frontmatter;
-		if (!fm?.surveyed) continue;
-
-		const surveyed = new Date(String(fm.surveyed));
-		if (isNaN(surveyed.getTime())) continue;
-
-		if (surveyed < cutoff) {
-			const daysAgo = Math.floor(
-				(Date.now() - surveyed.getTime()) / (1000 * 60 * 60 * 24)
-			);
-			issues.push({
-				check: "stale-surveyed",
-				severity: "info",
-				path: file.path,
-				message: `Last surveyed ${daysAgo} days ago (${fm.surveyed})`,
-				suggestion: `Review and update the surveyed date`,
-			});
-		}
-	}
-
-	return issues;
-}
-
 function checkTitleMismatch(app: App, keys: JDKeys): ValidationIssue[] {
 	const issues: ValidationIssue[] = [];
 
@@ -495,7 +465,6 @@ function checkJdexCategoryMismatch(app: App, jdex: JDex): ValidationIssue[] {
 // ── Engine ───────────────────────────────────────────────────────
 
 export interface ValidatorOptions {
-	staleDays?: number;
 	skipChecks?: string[];
 	keys: JDKeys;
 	jdConfig?: JDConfig | null;
@@ -520,7 +489,6 @@ export function runValidation(
 	options: ValidatorOptions
 ): ValidationReport {
 	const {
-		staleDays = 90,
 		skipChecks = [],
 		keys,
 		jdConfig = null,
@@ -540,7 +508,6 @@ export function runValidation(
 		["orphaned-file", () => checkOrphanedFiles(app, keys, indexTag)],
 		["broken-wikilink", () => checkBrokenWikilinks(app)],
 		["empty-note", () => checkEmptyNotes(app)],
-		["stale-surveyed", () => checkStaleSurveyed(app, staleDays)],
 		["title-mismatch", () => checkTitleMismatch(app, keys)],
 	];
 
