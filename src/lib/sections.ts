@@ -1,5 +1,6 @@
 /**
- * Markdown section upserts. Used by index-folder-note to write into named
+ * Markdown section upserts. Used by the folder-note and category indexers
+ * (lib/folder-notes.ts, lib/category-index.ts) to write into named
  * `## Heading` regions of cover notes without disturbing other prose.
  */
 

@@ -10,6 +10,8 @@ Companion plugin to the [jd-tools](https://github.com/nelsonlove/jd-tools) CLI s
 2. BRAT → **Add beta plugin** → `nelsonlove/obsidian-jd-dashboard`.
 3. Enable **Johnny Decimal Dashboard** in Community plugins.
 
+> **Upgrading from ≤0.2.0:** the *Render filesystem contents* command, its AI-provider settings, and the *stale-surveyed* audit check were removed in 0.3.0 — the `## Contents (Filesystem)` survey domain now belongs to the [jd-survey](https://github.com/nelsonlove/obsidian-jd-survey) plugin. Retired keys in `data.json` are cleaned up automatically on load. API keys the old feature stored in the OS keychain (service entries for `anthropic-api-key` / `openai-api-key`) are no longer read; remove them with Keychain Access if you want them gone.
+
 ## Features
 
 ### Inbox Dashboard

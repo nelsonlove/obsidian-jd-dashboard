@@ -358,11 +358,13 @@ export default class JDDashboardPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		const data = (await this.loadData()) ?? {};
+		// Retired in 0.3.0 (render-files + stale-surveyed removal): strip so
+		// saveSettings stops re-persisting dead keys from older data.json.
+		for (const k of ["llmProviders", "llmTaskModels", "renderFilesPrompt", "staleDays"]) {
+			delete (data as Record<string, unknown>)[k];
+		}
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 	}
 
 	async saveSettings(): Promise<void> {
