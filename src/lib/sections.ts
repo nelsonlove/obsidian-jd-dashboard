@@ -1,7 +1,6 @@
 /**
- * Markdown section upserts. Used by both renderers (render-files,
- * index-folder-note) to write into named `## Heading` regions of cover
- * notes without disturbing other prose.
+ * Markdown section upserts. Used by index-folder-note to write into named
+ * `## Heading` regions of cover notes without disturbing other prose.
  */
 
 /**
